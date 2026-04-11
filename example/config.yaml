@@ -1,0 +1,28 @@
+app:
+  name: example-service
+  version: v0.1.0
+  env: development
+
+server:
+  http:
+    addr: :8080
+    timeout: 30s
+  grpc:
+    addr: :9090
+
+database:
+  default:
+    driver: sqlite
+    dsn: "example.db"
+    trace_all_sql: true
+    slow_threshold: 100ms
+
+logger:
+  level: debug
+  output: stdout
+
+tracing:
+  endpoint: ""
+
+metric:
+  prometheus_addr: :9091
