@@ -1,0 +1,7 @@
+app:
+  name: test-service
+  env: development
+server:
+  http:
+    port: 8080
+    timeout: 30s
