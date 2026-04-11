@@ -54,10 +54,9 @@ func New(opts ...Option) (*Manager, error) {
 			sqlDB.SetConnMaxLifetime(d.cfg.ConnMaxLifetime)
 		}
 
-		// TODO: enable tracing plugin once plugin.go is implemented (TraceAllSQL field)
-		// if d.cfg.TraceAllSQL {
-		// 	db.Use(newTracingPlugin(d.name, o.logger, d.cfg.SlowThreshold))
-		// }
+		if d.cfg.TraceAllSQL {
+			db.Use(newTracingPlugin(d.name, o.logger, d.cfg.SlowThreshold))
+		}
 
 		registryMu.Lock()
 		registry[d.name] = db
@@ -75,12 +74,20 @@ func DB(name string) *gorm.DB {
 }
 
 // Up runs pending migrations. Satisfies app.Migrator interface.
-func (m *Manager) Up(_ context.Context) error {
+func (m *Manager) Up(ctx context.Context) error {
 	if m.opts.migrationsDir == "" {
 		return nil
 	}
-	// TODO: implement once migrate.go (NewMigrator) is added in the next task
-	return fmt.Errorf("database: migrator not yet implemented")
+	for _, d := range m.opts.drivers {
+		db := DB(d.name)
+		if db == nil {
+			continue
+		}
+		if err := NewMigrator(db, m.opts.migrationsDir).Up(ctx); err != nil {
+			return fmt.Errorf("database: migrate %q: %w", d.name, err)
+		}
+	}
+	return nil
 }
 
 func openDB(cfg DSNConfig) (*gorm.DB, error) {
