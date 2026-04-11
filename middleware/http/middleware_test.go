@@ -26,6 +26,8 @@ func TestTimeout_cancels(t *testing.T) {
 	r.GET("/slow", func(c *gin.Context) {
 		select {
 		case <-c.Request.Context().Done():
+			// Context cancelled — return without writing so middleware writes 503
+			return
 		case <-time.After(200 * time.Millisecond):
 			c.String(200, "ok")
 		}
