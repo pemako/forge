@@ -14,6 +14,7 @@ type options struct {
 	maxAgeDays int
 	maxBackups int
 	writer     io.Writer // test-only; nil = use output/filename
+	MaskFields []string
 }
 
 type Option func(*options)
@@ -25,6 +26,9 @@ func WithMaxSizeMB(mb int) Option     { return func(o *options) { o.maxSizeMB = 
 func WithMaxAgeDays(days int) Option  { return func(o *options) { o.maxAgeDays = days } }
 func WithMaxBackups(n int) Option     { return func(o *options) { o.maxBackups = n } }
 func WithWriter(w io.Writer) Option   { return func(o *options) { o.writer = w } }
+func WithMaskFields(fields ...string) Option {
+	return func(o *options) { o.MaskFields = append(o.MaskFields, fields...) }
+}
 
 // WithConfig reads logger settings from core.Config.
 func WithConfig(cfg core.Config) Option {
@@ -46,6 +50,9 @@ func WithConfig(cfg core.Config) Option {
 		}
 		if v := cfg.GetInt("logger.max_backups"); v > 0 {
 			o.maxBackups = v
+		}
+		if v := cfg.GetStringSlice("logger.mask_fields"); len(v) > 0 {
+			o.MaskFields = v
 		}
 	}
 }

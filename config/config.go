@@ -59,6 +59,7 @@ func (c *viperConfig) GetInt(key string) int                { return c.v.GetInt(
 func (c *viperConfig) GetBool(key string) bool              { return c.v.GetBool(key) }
 func (c *viperConfig) GetDuration(key string) time.Duration { return c.v.GetDuration(key) }
 func (c *viperConfig) GetFloat64(key string) float64        { return c.v.GetFloat64(key) }
+func (c *viperConfig) GetStringSlice(key string) []string   { return c.v.GetStringSlice(key) }
 
 func (c *viperConfig) Scan(key string, dest any) error {
 	return c.v.UnmarshalKey(key, dest)

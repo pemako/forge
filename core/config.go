@@ -13,6 +13,7 @@ type Config interface {
 	GetFloat64(key string) float64
 	// Scan unmarshals the sub-tree at key into dest (must be a pointer to a struct).
 	Scan(key string, dest any) error
+	GetStringSlice(key string) []string
 	// Watch registers fn to be called when key changes. fn receives the new value.
 	// Returns error if the watcher cannot be established (e.g., file not found).
 	// Only logger.level supports live reload; DB/server keys log a warning and are ignored.

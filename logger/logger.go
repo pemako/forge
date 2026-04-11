@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/pemako/mk/core"
 	"go.opentelemetry.io/otel/trace"
@@ -18,7 +19,27 @@ func F(key string, value any) core.Field {
 }
 
 type zapLogger struct {
-	z *zap.Logger
+	z          *zap.Logger
+	maskFields map[string]struct{} // lowercase field names to mask
+}
+
+// maskValue replaces the middle portion of a string with ***.
+// "mypassword" → "myp***ord"
+// Short values (<=4 chars) → "***"
+func maskValue(s string) string {
+	r := []rune(s)
+	n := len(r)
+	if n == 0 {
+		return "***"
+	}
+	if n <= 4 {
+		return "***"
+	}
+	keep := n / 4
+	if keep < 2 {
+		keep = 2
+	}
+	return string(r[:keep]) + "***" + string(r[n-keep:])
 }
 
 func New(opts ...Option) (core.Logger, error) {
@@ -49,37 +70,60 @@ func New(opts ...Option) (core.Logger, error) {
 		EncodeCaller:   zapcore.ShortCallerEncoder,
 	})
 
-	var w zapcore.WriteSyncer
-	if o.writer != nil {
-		w = zapcore.AddSync(o.writer)
-	} else {
-		w = buildWriter(o)
-	}
+	var cores []zapcore.Core
 
-	c := zapcore.NewCore(enc, w, level)
-	z := zap.New(c, zap.AddCaller(), zap.AddCallerSkip(1))
-	return &zapLogger{z: z}, nil
-}
-
-func buildWriter(o *options) zapcore.WriteSyncer {
-	var writers []zapcore.WriteSyncer
+	// stdout core
 	if o.output == "stdout" || o.output == "both" || o.output == "" {
-		writers = append(writers, zapcore.AddSync(os.Stdout))
+		cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(os.Stdout), level))
 	}
-	if (o.output == "file" || o.output == "both") && o.filename != "" {
-		lj := &lumberjack.Logger{
-			Filename:   o.filename,
-			MaxSize:    o.maxSizeMB,
-			MaxAge:     o.maxAgeDays,
-			MaxBackups: o.maxBackups,
-			Compress:   false,
+
+	// test writer override: skip file cores when writer is set
+	if o.writer != nil {
+		cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(o.writer), level))
+	} else if (o.output == "file" || o.output == "both") && o.filename != "" {
+		// Level-split file cores
+		levels := []struct {
+			name  string
+			level zapcore.Level
+			max   zapcore.Level
+		}{
+			{"debug", zapcore.DebugLevel, zapcore.DebugLevel},
+			{"info", zapcore.InfoLevel, zapcore.InfoLevel},
+			{"warn", zapcore.WarnLevel, zapcore.WarnLevel},
+			{"error", zapcore.ErrorLevel, zapcore.FatalLevel},
 		}
-		writers = append(writers, zapcore.AddSync(lj))
+		for _, lv := range levels {
+			if lv.level < level {
+				continue // skip levels below configured minimum
+			}
+			lj := &lumberjack.Logger{
+				Filename:   o.filename + "." + lv.name + ".log",
+				MaxSize:    o.maxSizeMB,
+				MaxAge:     o.maxAgeDays,
+				MaxBackups: o.maxBackups,
+				Compress:   false,
+			}
+			lvCopy := lv // capture for closure
+			levelEnabler := zap.LevelEnablerFunc(func(l zapcore.Level) bool {
+				return l >= lvCopy.level && l <= lvCopy.max
+			})
+			cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(lj), levelEnabler))
+		}
 	}
-	if len(writers) == 0 {
-		writers = append(writers, zapcore.AddSync(io.Discard))
+
+	if len(cores) == 0 {
+		cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(io.Discard), level))
 	}
-	return zapcore.NewMultiWriteSyncer(writers...)
+
+	z := zap.New(zapcore.NewTee(cores...), zap.AddCaller(), zap.AddCallerSkip(1))
+
+	// Build maskFields set
+	maskFields := make(map[string]struct{}, len(o.MaskFields))
+	for _, f := range o.MaskFields {
+		maskFields[strings.ToLower(f)] = struct{}{}
+	}
+
+	return &zapLogger{z: z, maskFields: maskFields}, nil
 }
 
 func extractTraceFields(ctx context.Context) []zap.Field {
@@ -94,32 +138,40 @@ func extractTraceFields(ctx context.Context) []zap.Field {
 	}
 }
 
-func toZapFields(ctx context.Context, fields []core.Field) []zap.Field {
+func toZapFields(ctx context.Context, fields []core.Field, maskFields map[string]struct{}) []zap.Field {
 	zf := extractTraceFields(ctx)
 	for _, f := range fields {
-		zf = append(zf, zap.Any(f.Key, f.Value))
+		val := f.Value
+		if _, masked := maskFields[strings.ToLower(f.Key)]; masked {
+			if s, ok := val.(string); ok {
+				val = maskValue(s)
+			} else {
+				val = "***"
+			}
+		}
+		zf = append(zf, zap.Any(f.Key, val))
 	}
 	return zf
 }
 
 func (l *zapLogger) Debug(ctx context.Context, msg string, fields ...core.Field) {
-	l.z.Debug(msg, toZapFields(ctx, fields)...)
+	l.z.Debug(msg, toZapFields(ctx, fields, l.maskFields)...)
 }
 func (l *zapLogger) Info(ctx context.Context, msg string, fields ...core.Field) {
-	l.z.Info(msg, toZapFields(ctx, fields)...)
+	l.z.Info(msg, toZapFields(ctx, fields, l.maskFields)...)
 }
 func (l *zapLogger) Warn(ctx context.Context, msg string, fields ...core.Field) {
-	l.z.Warn(msg, toZapFields(ctx, fields)...)
+	l.z.Warn(msg, toZapFields(ctx, fields, l.maskFields)...)
 }
 func (l *zapLogger) Error(ctx context.Context, msg string, fields ...core.Field) {
-	l.z.Error(msg, toZapFields(ctx, fields)...)
+	l.z.Error(msg, toZapFields(ctx, fields, l.maskFields)...)
 }
 func (l *zapLogger) With(fields ...core.Field) core.Logger {
 	zf := make([]zap.Field, len(fields))
 	for i, f := range fields {
 		zf[i] = zap.Any(f.Key, f.Value)
 	}
-	return &zapLogger{z: l.z.With(zf...)}
+	return &zapLogger{z: l.z.With(zf...), maskFields: l.maskFields}
 }
 
 var _default core.Logger = &zapLogger{z: zap.NewNop()}
