@@ -5,10 +5,10 @@ app:
 
 server:
   http:
-    addr: :8080
+    addr: :18080
     timeout: 30s
   grpc:
-    addr: :9090
+    addr: :19090
 
 database:
   default:
@@ -18,11 +18,15 @@ database:
     slow_threshold: 100ms
 
 logger:
-  level: debug
-  output: stdout
+  level: info
+  output: file
 
 tracing:
   endpoint: ""
 
 metric:
-  prometheus_addr: :9091
+  prometheus_addr: :19091
+
+cache:
+  default:
+    backend: memory
