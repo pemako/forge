@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/pemako/mk/cron"
+	"github.com/pemako/mk/lock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -121,4 +123,42 @@ func TestScheduler_Remove(t *testing.T) {
 	before := count.Load()
 	time.Sleep(120 * time.Millisecond)
 	assert.Equal(t, before, count.Load(), "job must not run after removal")
+}
+
+func TestScheduler_distributedLock_onlyOneRuns(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	locker1 := lock.New(mr.Addr())
+	locker2 := lock.New(mr.Addr())
+
+	s1 := cron.New()
+	s2 := cron.New()
+
+	var count atomic.Int32
+	jobFn := func(_ context.Context) error {
+		count.Add(1)
+		time.Sleep(60 * time.Millisecond) // hold lock during execution
+		return nil
+	}
+
+	require.NoError(t, s1.Add("locked-job", "@every 50ms", jobFn,
+		cron.WithDistributedLock(locker1, cron.LockTTL(5*time.Second)),
+	))
+	require.NoError(t, s2.Add("locked-job", "@every 50ms", jobFn,
+		cron.WithDistributedLock(locker2, cron.LockTTL(5*time.Second)),
+	))
+
+	ctx := context.Background()
+	go s1.Start(ctx)
+	go s2.Start(ctx)
+	defer s1.Stop(ctx)
+	defer s2.Stop(ctx)
+
+	time.Sleep(200 * time.Millisecond)
+	// With the lock, count should be much less than 2*schedulers*ticks
+	// Without the lock it would be ~8. With the lock it should be <= 4.
+	assert.LessOrEqual(t, count.Load(), int32(4),
+		"distributed lock should prevent most duplicate runs")
 }

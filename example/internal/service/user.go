@@ -15,6 +15,7 @@ import (
 	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/metric"
+	"github.com/pemako/mk/stream"
 
 	"github.com/pemako/mk/example/internal/model"
 	"github.com/pemako/mk/example/internal/repository"
@@ -48,6 +49,7 @@ func (s *UserService) Create(ctx context.Context, name, email string) (*model.Us
 	}
 	metric.Count(ctx, "user_created_total", 1)
 	_ = s.bus.Publish(ctx, "user.created", u)
+	_ = stream.Publish(ctx, "user.created", u)
 	return u, nil
 }
 

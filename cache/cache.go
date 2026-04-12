@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pemako/mk/logger"
+	"github.com/redis/go-redis/v9"
 )
 
 // ErrCacheMiss is returned when a key does not exist or has expired.
@@ -65,4 +66,19 @@ func Client(name string) Cache {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	return registry[name]
+}
+
+// RedisClient returns the underlying *redis.Client for the named Redis backend.
+// Returns nil if the backend is not registered or is not a Redis backend
+// (e.g., in-memory backend).
+// Used by packages that need direct access to Redis operations such as
+// stream processing.
+func RedisClient(name string) *redis.Client {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	c := registry[name]
+	if rc, ok := c.(*redisCache); ok {
+		return rc.client
+	}
+	return nil
 }

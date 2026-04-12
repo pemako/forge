@@ -30,6 +30,7 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 | `circuitbreaker` | Circuit breaker pattern for protecting outbound calls from cascading failures (Closed → Open → HalfOpen) |
 | `storage` | Unified object storage interface for S3, Alibaba Cloud OSS, and Tencent Cloud COS |
 | `notify` | Multi-channel notification dispatcher: Email (SMTP), SMS, DingTalk, WeCom, and Feishu webhooks |
+| `stream` | Distributed pub/sub and work-queue messaging backed by Redis Streams (XADD / XREADGROUP) |
 
 ## Installation
 
@@ -499,6 +500,19 @@ exists, err := c.Exists(ctx, "user:1")
 | `WithConfig(cfg)` | Read all backends from config (see YAML below) |
 | `WithLogger(log)` | Logger for slow Redis command warnings |
 
+**`RedisClient(name)` helper**
+
+`cache.RedisClient("name")` returns the underlying `*redis.Client` for a named Redis backend, or `nil` if the backend is not registered or is an in-memory backend. Use this to share a single Redis connection across packages that need direct Redis access — most commonly `stream` and `lock`:
+
+```go
+// Register a shared Redis backend once at startup
+cache.Init(cache.WithConfig(cfg))
+
+// Share the same connection with stream and lock — no duplicate connections
+stream.Init(cache.RedisClient("redis"))
+locker := lock.NewWithClient(cache.RedisClient("redis"))
+```
+
 **Config**
 
 ```yaml
@@ -826,6 +840,30 @@ app.New(
 | `WithRetries(n)` | `0` | Max retry attempts on error |
 | `WithRetryDelay(d)` | `1s` | Base delay for exponential backoff between retries |
 | `WithSkipIfRunning()` | false | Skip the tick if a previous execution is still running |
+| `WithDistributedLock(locker, opts...)` | — | Acquire a Redis distributed lock before each run; skip tick if already held by another instance |
+
+**`WithDistributedLock` options**
+
+| Option | Description |
+|---|---|
+| `LockTTL(d)` | Explicit lock TTL (defaults to `WithTimeout` value, then `30s`) |
+| `LockKey(key)` | Custom Redis key (defaults to `"cron:<job-name>"`) |
+
+```go
+locker := lock.NewWithClient(cache.RedisClient("redis"))
+
+scheduler.Add("send-report", "@every 1h", fn,
+    cron.WithTimeout(5*time.Minute),
+    cron.WithDistributedLock(locker),  // TTL = 5min (from WithTimeout)
+)
+
+scheduler.Add("cleanup", "@every 5m", fn,
+    cron.WithDistributedLock(locker,
+        cron.LockTTL(3*time.Minute),
+        cron.LockKey("my-custom-cleanup-lock"),
+    ),
+)
+```
 
 **Log output**
 
@@ -1213,9 +1251,109 @@ presigned, err := store.PresignURL(ctx, "avatars/user-1.jpg", time.Hour)
 
 ---
 
-### `notify`
+### `stream`
 
-Multi-channel notification dispatcher. Configure one or more channels at startup; then call `Send` with a `Message` specifying which channels to use.
+Distributed pub/sub and work-queue messaging backed by Redis Streams (requires Redis 5.0+). Two delivery modes are supported: work-queue (one instance processes each message) and broadcast (every instance receives each message).
+
+The package takes a `*redis.Client` directly. The recommended pattern is to share the connection via `cache.RedisClient` to avoid duplicating the Redis address in config.
+
+**Key API**
+
+| Symbol | Description |
+|---|---|
+| `Init(client, opts...)` | Set the Redis client; call once before Publish/Subscribe/Worker |
+| `Publish(ctx, topic, payload) error` | JSON-marshal payload and write to the named stream |
+| `Subscribe(topic, opts...)` | Register a handler for the topic (call before `Worker().Start`) |
+| `Worker(log...) *streamWorker` | Returns a `core.Server` — add to `app.WithServer` |
+| `Message.Decode(dest) error` | Unmarshal the message payload into a typed value |
+| `ResetSubs()` | Clear all subscriptions (tests only) |
+
+**Two modes**
+
+| Mode | Option | Behaviour |
+|---|---|---|
+| Work queue | `WithGroup("name")` | All instances share the group; Redis delivers each message to exactly one instance |
+| Broadcast | `WithBroadcast()` | Each instance joins a unique group derived from hostname; every instance receives every message |
+
+**Config pattern**
+
+```yaml
+cache:
+  default:
+    backend: memory       # regular cache
+  redis:
+    backend: redis        # shared for lock + stream
+    addr: "redis:6379"
+    password: ""
+    db: 0
+```
+
+```go
+// main.go — share the Redis connection registered in the cache package
+cache.Init(cache.WithConfig(cfg))
+stream.Init(cache.RedisClient("redis"))
+
+// Work queue — one instance processes each message
+stream.Subscribe("order.created",
+    stream.WithGroup("order-service"),
+    stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
+        var e OrderEvent
+        _ = msg.Decode(&e)
+        return processOrder(ctx, e)
+    }),
+    stream.WithRetries(3),
+    stream.WithConcurrency(2),
+)
+
+// Broadcast — every instance receives each message
+stream.Subscribe("config.reload",
+    stream.WithBroadcast(),
+    stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
+        return reloadConfig(ctx)
+    }),
+)
+
+// Wire the stream worker into the app lifecycle
+app.New(
+    app.WithServer(httpSrv, grpcSrv, scheduler, stream.Worker()),
+)
+```
+
+**Publish**
+
+```go
+// Publish from anywhere — payload is JSON-marshalled automatically
+if err := stream.Publish(ctx, "order.created", &OrderEvent{ID: 42}); err != nil {
+    log.Error(ctx, "publish failed", logger.F("err", err))
+}
+```
+
+**Dead-letter stream**
+
+Messages that fail all retry attempts are moved to `<topic>:dead` as a Redis Stream entry for manual inspection or reprocessing.
+
+**`Init` options**
+
+| Option | Default | Description |
+|---|---|---|
+| `WithLogger(log)` | default logger | Logger for stream worker events |
+| `WithMaxLen(n)` | `10_000` | Approximate maximum entries retained per stream via MAXLEN trimming |
+
+**`Subscribe` options**
+
+| Option | Default | Description |
+|---|---|---|
+| `WithGroup(name)` | topic name | Consumer group name; all instances sharing the name form a work queue |
+| `WithBroadcast()` | — | Each instance joins a unique group; mutually exclusive with `WithGroup` |
+| `WithConsumer(name)` | hostname | Consumer name within the group; must be unique per instance |
+| `WithHandler(fn)` | — | Message processing function (required) |
+| `WithRetries(n)` | `0` | Max retries before moving to `<topic>:dead` |
+| `WithRetryDelay(d)` | `1s` | Base delay between retries |
+| `WithConcurrency(n)` | `1` | Number of goroutines reading from this subscription |
+
+---
+
+### `notify` Configure one or more channels at startup; then call `Send` with a `Message` specifying which channels to use.
 
 **Key API**
 
@@ -1591,6 +1729,10 @@ github.com/pemako/mk/
 │   ├── email.go            # SMTP sender
 │   ├── sms.go              # Alibaba Cloud SMS sender
 │   └── webhook.go          # DingTalk / WeCom / Feishu webhook sender
+├── stream/                 # Distributed pub/sub and work-queue (Redis Streams)
+│   ├── stream.go           # Init, Publish, Subscribe, Worker, Message, ResetSubs
+│   ├── options.go          # InitOption, SubOption, WithGroup, WithBroadcast, WithHandler, etc.
+│   └── worker.go           # streamWorker implementing core.Server
 └── example/                # Runnable reference application
     ├── main.go
     ├── config.yaml

@@ -15,6 +15,38 @@ import (
 // executeJob wraps a job function with recover, optional timeout, and retry.
 // Logs start/done/skip/failed events via log.
 func executeJob(ctx context.Context, name string, fn func(context.Context) error, opts jobOptions, running *atomic.Int32, log core.Logger) {
+	// Distributed lock: ensure only one instance across the cluster runs this job.
+	if opts.distLock != nil {
+		dl := opts.distLock
+		key := dl.key
+		if key == "" {
+			key = "cron:" + name
+		}
+		ttl := dl.ttl
+		if ttl == 0 && opts.timeout > 0 {
+			ttl = opts.timeout
+		}
+		if ttl == 0 {
+			ttl = 30 * time.Second
+		}
+		acquired, err := dl.locker.Acquire(ctx, key, ttl)
+		if err != nil {
+			log.Error(ctx, "cron: lock error",
+				core.Field{Key: "job", Value: name},
+				core.Field{Key: "err", Value: err.Error()},
+			)
+			return
+		}
+		if !acquired {
+			log.Debug(ctx, "cron skip: lock held by another instance",
+				core.Field{Key: "job", Value: name},
+				core.Field{Key: "key", Value: key},
+			)
+			return
+		}
+		defer func() { _ = dl.locker.Release(context.Background(), key) }()
+	}
+
 	if opts.skipIfRunning && !running.CompareAndSwap(0, 1) {
 		log.Warn(ctx, "cron skip",
 			core.Field{Key: "job", Value: name},

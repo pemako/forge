@@ -15,10 +15,12 @@ import (
 	"github.com/pemako/mk/event"
 	"github.com/pemako/mk/grpcclient"
 	"github.com/pemako/mk/httpclient"
+	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/logger"
 	"github.com/pemako/mk/metric"
 	grpcserver "github.com/pemako/mk/server/grpc"
 	httpserver "github.com/pemako/mk/server/http"
+	"github.com/pemako/mk/stream"
 	"github.com/pemako/mk/tracing"
 
 	httphandler "github.com/pemako/mk/example/internal/handler/http"
@@ -63,6 +65,18 @@ func main() {
 
 	// Cache (optional — skip if not configured)
 	_ = cache.Init(cache.WithConfig(cfg))
+
+	// Stream — distributed pub/sub via Redis Streams (shares the "redis" cache connection)
+	stream.Init(cache.RedisClient("redis"))
+
+	// Subscribe to user.created event (work queue — one instance processes each message)
+	stream.Subscribe("user.created",
+		stream.WithGroup("example-service"),
+		stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
+			logger.Info(ctx, "stream: received user.created event")
+			return nil
+		}),
+	)
 
 	// HTTP client — register named client for external API calls
 	httpclient.Register("jsonplaceholder",
@@ -121,6 +135,7 @@ func main() {
 
 	// Cron scheduler — register background jobs
 	scheduler := cron.New(cron.WithLogger(log))
+	locker := lock.NewWithClient(cache.RedisClient("redis"))
 	if err := scheduler.Add("cleanup-expired-sessions", "@every 1m",
 		func(ctx context.Context) error {
 			log.Info(ctx, "running scheduled cleanup")
@@ -129,6 +144,7 @@ func main() {
 		},
 		cron.WithTimeout(30*time.Second),
 		cron.WithSkipIfRunning(),
+		cron.WithDistributedLock(locker),
 	); err != nil {
 		panic("cron: " + err.Error())
 	}
@@ -137,7 +153,7 @@ func main() {
 	if err := app.New(
 		app.WithName(cfg.GetString("app.name")),
 		app.WithVersion(cfg.GetString("app.version")),
-		app.WithServer(httpSrv, grpcSrv, scheduler),
+		app.WithServer(httpSrv, grpcSrv, scheduler, stream.Worker()),
 		app.WithLogger(log),
 		app.WithMigration(dbMgr),
 		app.WithBeforeStart(func(ctx context.Context) error {
