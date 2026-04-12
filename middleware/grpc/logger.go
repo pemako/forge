@@ -9,6 +9,10 @@ import (
 	"google.golang.org/grpc"
 )
 
+// UnaryLogger returns a gRPC unary server interceptor that logs each completed
+// RPC at INFO level. The log entry includes the full method name, latency, and
+// any error returned by the handler. If log is nil, the process-wide default
+// logger is used.
 func UnaryLogger(log core.Logger) grpc.UnaryServerInterceptor {
 	if log == nil {
 		log = logger.Default()

@@ -22,7 +22,11 @@ var (
 	promSrv        *http.Server
 )
 
-// Init sets up Prometheus and/or OTLP metric exporters, then wires HTTP/gRPC hooks.
+// Init sets up Prometheus and/or OTLP metric exporters, registers them with
+// the global OpenTelemetry MeterProvider, and wires the HTTP and gRPC
+// instrumentation hooks in the middleware packages. It is safe to call Init
+// without any exporters configured; in that case a no-op provider is used.
+// Init must be called before any of the metric helper functions are used.
 func Init(opts ...Option) error {
 	o := options{serviceName: "service"}
 	for _, opt := range opts {
@@ -73,7 +77,9 @@ func Init(opts ...Option) error {
 	return nil
 }
 
-// Shutdown flushes pending metrics and stops the Prometheus HTTP server.
+// Shutdown flushes any pending metric data, stops the Prometheus HTTP server
+// if one was started, and releases exporter resources. Register this with
+// app.WithAfterStop to ensure metrics are flushed on graceful shutdown.
 func Shutdown() {
 	if globalProvider != nil {
 		globalProvider.Shutdown(context.Background()) //nolint:errcheck

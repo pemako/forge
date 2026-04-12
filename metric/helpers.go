@@ -9,8 +9,13 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 )
 
+// LabelOption is a key-value label (attribute) attached to a metric recording.
+// Use the Label constructor to create one.
 type LabelOption struct{ k, v string }
 
+// Label creates a LabelOption with the given key and value.
+// Pass multiple Label calls to Count, Gauge, StartTimer, or Duration to
+// add dimensions to the recorded metric.
 func Label(key, value string) LabelOption { return LabelOption{k: key, v: value} }
 
 func toAttrs(labels []LabelOption) []attribute.KeyValue {
@@ -30,25 +35,39 @@ func getMeter() otelmetric.Meter {
 	return globalMeter
 }
 
+// Count increments the named integer counter by n. The counter is created on
+// first use. If Init has not been called, this is a no-op.
 func Count(ctx context.Context, name string, n int64, labels ...LabelOption) {
 	c, _ := getMeter().Int64Counter(name)
 	c.Add(ctx, n, otelmetric.WithAttributes(toAttrs(labels)...))
 }
 
+// Gauge sets the named float64 up-down counter to value. Use this for
+// metrics that can increase or decrease (e.g., active connections, queue depth).
+// If Init has not been called, this is a no-op.
 func Gauge(ctx context.Context, name string, value float64, labels ...LabelOption) {
 	g, _ := getMeter().Float64UpDownCounter(name)
 	g.Add(ctx, value, otelmetric.WithAttributes(toAttrs(labels)...))
 }
 
+// GaugeAdd adds delta to the named float64 up-down counter.
+// If Init has not been called, this is a no-op.
 func GaugeAdd(ctx context.Context, name string, delta float64, labels ...LabelOption) {
 	g, _ := getMeter().Float64UpDownCounter(name)
 	g.Add(ctx, delta, otelmetric.WithAttributes(toAttrs(labels)...))
 }
 
+// GaugeSub subtracts delta from the named float64 up-down counter.
+// It is equivalent to GaugeAdd(ctx, name, -delta, labels...).
 func GaugeSub(ctx context.Context, name string, delta float64, labels ...LabelOption) {
 	GaugeAdd(ctx, name, -delta, labels...)
 }
 
+// StartTimer returns a function that, when called, records the elapsed time
+// since StartTimer was called in the histogram named "<name>_duration_seconds".
+// Use the returned function as a deferred call to measure function duration:
+//
+//	defer metric.StartTimer(ctx, "db_query", metric.Label("op", "select"))()
 func StartTimer(ctx context.Context, name string, labels ...LabelOption) func() {
 	h, _ := getMeter().Float64Histogram(name + "_duration_seconds")
 	start := time.Now()
@@ -57,6 +76,9 @@ func StartTimer(ctx context.Context, name string, labels ...LabelOption) func() 
 	}
 }
 
+// Duration records a pre-measured duration d in the histogram named
+// "<name>_duration_seconds". Use this when the duration is already known
+// rather than measuring it inline with StartTimer.
 func Duration(ctx context.Context, name string, d time.Duration, labels ...LabelOption) {
 	h, _ := getMeter().Float64Histogram(name + "_duration_seconds")
 	h.Record(ctx, d.Seconds(), otelmetric.WithAttributes(toAttrs(labels)...))

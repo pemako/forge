@@ -16,6 +16,10 @@ type ginServer struct {
 }
 
 // New creates a new HTTP server with the default middleware stack pre-mounted.
+// The middleware order is: RequestID -> Tracing -> Logger -> Metrics ->
+// Recovery -> ErrorHandler. Health endpoints /healthz, /readyz, and /health
+// are registered automatically before any business routes.
+// Defaults: addr=":8080", readTimeout=30s, writeTimeout=30s.
 func New(opts ...Option) (*ginServer, error) {
 	o := options{
 		addr:           ":8080",
@@ -60,9 +64,12 @@ func New(opts ...Option) (*ginServer, error) {
 	return s, nil
 }
 
-// Engine returns the underlying *gin.Engine for business route registration.
+// Engine returns the underlying *gin.Engine so callers can register
+// application-specific routes and middleware after server creation.
 func (s *ginServer) Engine() *gin.Engine { return s.r }
 
+// Start begins listening on the configured address and blocks until the server
+// is stopped. It implements core.Server.
 func (s *ginServer) Start(_ context.Context) error {
 	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
@@ -70,6 +77,8 @@ func (s *ginServer) Start(_ context.Context) error {
 	return nil
 }
 
+// Stop gracefully shuts down the HTTP server, waiting for in-flight requests
+// to complete until the deadline carried by ctx is exceeded. It implements core.Server.
 func (s *ginServer) Stop(ctx context.Context) error {
 	return s.srv.Shutdown(ctx)
 }

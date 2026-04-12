@@ -7,6 +7,10 @@ import (
 	"google.golang.org/grpc"
 )
 
+// UnaryMetrics returns a gRPC unary server interceptor that records
+// grpc_requests_total, grpc_request_duration_seconds, and grpc_requests_in_flight
+// for each RPC. The hooks are no-ops until metric.Init() wires real counters
+// by calling RegisterGRPCMetricHooks.
 func UnaryMetrics() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		grpcInFlightInc(info.FullMethod)

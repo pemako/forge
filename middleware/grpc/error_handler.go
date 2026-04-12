@@ -9,6 +9,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// httpToGRPCCode maps HTTP status codes from *errors.CodedError to the
+// equivalent gRPC status codes.
 var httpToGRPCCode = map[int]codes.Code{
 	400: codes.InvalidArgument,
 	401: codes.Unauthenticated,
@@ -31,6 +33,10 @@ func toGRPCStatus(err error) *status.Status {
 	return status.New(codes.Internal, "internal server error")
 }
 
+// UnaryErrorHandler is a gRPC unary server interceptor that translates
+// *errors.CodedError values returned by handlers into the appropriate gRPC
+// status code. Other errors are mapped to codes.Internal. This interceptor
+// should be the last in the chain (closest to the handler).
 func UnaryErrorHandler(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	resp, err := handler(ctx, req)
 	if err != nil {

@@ -12,7 +12,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
-// Manager holds initialized connections and satisfies app.Migrator.
+// Manager holds the configuration for all registered database connections and
+// satisfies the app.Migrator interface. Obtain one with New.
 type Manager struct {
 	opts options
 }
@@ -22,7 +23,10 @@ var (
 	registryMu sync.RWMutex
 )
 
-// New opens all configured connections, validates each with Ping, and registers them.
+// New opens all configured database connections, validates each with a Ping,
+// applies connection pool settings, optionally installs the tracing plugin,
+// and registers each connection in the global registry. It returns an error if
+// any connection cannot be opened or does not respond to Ping.
 func New(opts ...Option) (*Manager, error) {
 	o := options{}
 	for _, opt := range opts {
@@ -66,14 +70,19 @@ func New(opts ...Option) (*Manager, error) {
 	return &Manager{opts: o}, nil
 }
 
-// DB returns the *gorm.DB for the named connection, or nil if not registered.
+// DB returns the *gorm.DB for the named connection from the global registry,
+// or nil if the name has not been registered. Connections are registered
+// by New and are available to any package without further configuration.
 func DB(name string) *gorm.DB {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	return registry[name]
 }
 
-// Up runs pending migrations. Satisfies app.Migrator interface.
+// Up applies all pending migrations for every registered database connection.
+// It is a no-op when WithMigrationsDir was not configured.
+// Up satisfies the app.Migrator interface and is called by app.Run before
+// BeforeStart hooks and server startup.
 func (m *Manager) Up(ctx context.Context) error {
 	if m.opts.migrationsDir == "" {
 		return nil

@@ -13,7 +13,11 @@ type viperConfig struct {
 	watchers map[string][]func(any)
 }
 
-// Load initializes a new Config from the provided options.
+// Load initializes a new Config from the provided options and returns a
+// core.Config-compatible value. It reads the configuration file (if WithFile
+// was used), binds environment variables (if WithEnv was used), and starts
+// the file watcher (if WithWatch was used).
+// Returns an error if the config file cannot be read.
 func Load(opts ...Option) (*viperConfig, error) {
 	o := &options{}
 	for _, opt := range opts {

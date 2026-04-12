@@ -15,7 +15,10 @@ var (
 	registryMu sync.RWMutex
 )
 
-// Init initializes all configured Redis clients, validates connections, and registers them.
+// Init creates and validates all configured Redis clients, attaches a
+// slow-command logging hook to each, and registers them in the global registry.
+// It returns an error if any client cannot connect within 3 seconds.
+// Init is typically called once during application startup via app.WithBeforeStart.
 func Init(opts ...Option) error {
 	o := &options{}
 	for _, opt := range opts {
@@ -49,7 +52,9 @@ func Init(opts ...Option) error {
 	return nil
 }
 
-// Client returns the *redis.Client for the named instance, or nil if not registered.
+// Client returns the *redis.Client registered under name, or nil if the
+// name has not been registered. Clients are registered by Init and are
+// available to any package without further configuration.
 func Client(name string) *redis.Client {
 	registryMu.RLock()
 	defer registryMu.RUnlock()

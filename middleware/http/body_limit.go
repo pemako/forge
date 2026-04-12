@@ -9,6 +9,10 @@ import (
 	"github.com/pemako/mk/errors"
 )
 
+// BodyLimit returns a Gin middleware that enforces a maximum request body size.
+// size is a human-readable string like "8MB", "1GB", or "512KB".
+// When the limit is exceeded, the middleware responds with HTTP 413
+// Payload Too Large. If size cannot be parsed, the default of 8 MB is used.
 func BodyLimit(size string) gin.HandlerFunc {
 	maxBytes := parseSize(size)
 	return func(c *gin.Context) {

@@ -13,7 +13,8 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// F creates a core.Field shorthand.
+// F creates a core.Field from a key-value pair.
+// Use F as a shorthand when calling Info, Debug, Warn, or Error.
 func F(key string, value any) core.Field {
 	return core.Field{Key: key, Value: value}
 }
@@ -42,6 +43,10 @@ func maskValue(s string) string {
 	return string(r[:keep]) + "***" + string(r[n-keep:])
 }
 
+// New creates a new core.Logger backed by zap. Configuration is applied via
+// functional options; sensible defaults are used for any unset options:
+// level=info, output=stdout, maxSizeMB=100, maxAgeDays=7, maxBackups=10.
+// Returns an error if the level string is not a valid zapcore.Level.
 func New(opts ...Option) (core.Logger, error) {
 	o := &options{
 		level:      "info",
@@ -174,12 +179,33 @@ func (l *zapLogger) With(fields ...core.Field) core.Logger {
 	return &zapLogger{z: l.z.With(zf...), maskFields: l.maskFields}
 }
 
+// _default is the process-wide logger, initialized to a no-op.
 var _default core.Logger = &zapLogger{z: zap.NewNop()}
 
+// SetDefault installs log as the process-wide default logger.
+// Call this once during application startup after constructing a logger with New.
 func SetDefault(log core.Logger) { _default = log }
-func Default() core.Logger       { return _default }
 
-func Debug(ctx context.Context, msg string, fields ...core.Field) { _default.Debug(ctx, msg, fields...) }
-func Info(ctx context.Context, msg string, fields ...core.Field)  { _default.Info(ctx, msg, fields...) }
-func Warn(ctx context.Context, msg string, fields ...core.Field)  { _default.Warn(ctx, msg, fields...) }
-func Error(ctx context.Context, msg string, fields ...core.Field) { _default.Error(ctx, msg, fields...) }
+// Default returns the process-wide default logger.
+// The default is a no-op logger until SetDefault is called.
+func Default() core.Logger { return _default }
+
+// Debug logs a message at DEBUG level using the default logger.
+func Debug(ctx context.Context, msg string, fields ...core.Field) {
+	_default.Debug(ctx, msg, fields...)
+}
+
+// Info logs a message at INFO level using the default logger.
+func Info(ctx context.Context, msg string, fields ...core.Field) {
+	_default.Info(ctx, msg, fields...)
+}
+
+// Warn logs a message at WARN level using the default logger.
+func Warn(ctx context.Context, msg string, fields ...core.Field) {
+	_default.Warn(ctx, msg, fields...)
+}
+
+// Error logs a message at ERROR level using the default logger.
+func Error(ctx context.Context, msg string, fields ...core.Field) {
+	_default.Error(ctx, msg, fields...)
+}

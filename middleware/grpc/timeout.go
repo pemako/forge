@@ -9,6 +9,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// UnaryTimeout returns a gRPC unary server interceptor that enforces a maximum
+// duration for each RPC. If the handler does not return within d, the context
+// is cancelled and codes.DeadlineExceeded is returned to the caller.
 func UnaryTimeout(d time.Duration) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		ctx, cancel := context.WithTimeout(ctx, d)

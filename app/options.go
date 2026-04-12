@@ -1,3 +1,18 @@
+// Package app provides the application lifecycle manager for mk services.
+// It coordinates startup (migrations, hooks, servers) and graceful shutdown
+// in response to SIGTERM or SIGINT, giving each registered server time to
+// drain in-flight requests.
+//
+// Typical usage:
+//
+//	a := app.New(
+//	    app.WithName("my-service"),
+//	    app.WithServer(httpSrv),
+//	    app.WithMigration(dbManager),
+//	)
+//	if err := a.Run(); err != nil {
+//	    log.Fatal(err)
+//	}
 package app
 
 import (
@@ -7,12 +22,16 @@ import (
 	"github.com/pemako/mk/core"
 )
 
-// Migrator is the interface app accepts for running database migrations.
-// *database.Manager implements this. Defined here to avoid import cycles.
+// Migrator is the interface app accepts for running database migrations before
+// servers are started. *database.Manager implements this interface.
+// It is defined here (rather than in the database package) to avoid import cycles.
 type Migrator interface {
+	// Up applies all pending migrations. It is called once during app startup,
+	// before BeforeStart hooks and server initialization.
 	Up(ctx context.Context) error
 }
 
+// options holds the functional configuration for New.
 type options struct {
 	name            string
 	version         string
@@ -24,24 +43,46 @@ type options struct {
 	afterStop       []func(context.Context) error
 }
 
+// Option is a functional option for configuring the App.
 type Option func(*options)
 
-func WithName(name string) Option     { return func(o *options) { o.name = name } }
-func WithVersion(v string) Option     { return func(o *options) { o.version = v } }
+// WithName sets the application name used in log output. Defaults to "app".
+func WithName(name string) Option { return func(o *options) { o.name = name } }
+
+// WithVersion sets the application version string used in log output. Defaults to "unknown".
+func WithVersion(v string) Option { return func(o *options) { o.version = v } }
+
+// WithLogger sets the logger used for lifecycle events. Defaults to logger.Default().
 func WithLogger(l core.Logger) Option { return func(o *options) { o.logger = l } }
 
+// WithServer registers one or more servers to be started concurrently by Run.
+// All registered servers are stopped on shutdown.
 func WithServer(servers ...core.Server) Option {
 	return func(o *options) { o.servers = append(o.servers, servers...) }
 }
+
+// WithShutdownTimeout sets the maximum time allowed for all servers to stop
+// gracefully. Defaults to 30 seconds.
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(o *options) { o.shutdownTimeout = d }
 }
+
+// WithMigration registers a Migrator whose Up method is called once before
+// BeforeStart hooks and server startup. Use this to run database migrations.
 func WithMigration(m Migrator) Option {
 	return func(o *options) { o.migrator = m }
 }
+
+// WithBeforeStart registers a hook that is called after migrations but before
+// any servers are started. Multiple hooks are executed in registration order.
+// If a hook returns an error, Run aborts immediately.
 func WithBeforeStart(fn func(context.Context) error) Option {
 	return func(o *options) { o.beforeStart = append(o.beforeStart, fn) }
 }
+
+// WithAfterStop registers a hook that is called after all servers have stopped.
+// Use this to flush telemetry or release resources (e.g., tracing.Provider.Shutdown).
+// Multiple hooks are executed in registration order.
 func WithAfterStop(fn func(context.Context) error) Option {
 	return func(o *options) { o.afterStop = append(o.afterStop, fn) }
 }

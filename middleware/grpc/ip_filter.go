@@ -11,11 +11,18 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// GRPCIPFilterConfig configures the IP allowlist/blocklist interceptor.
 type GRPCIPFilterConfig struct {
+	// Mode is either "whitelist" (allow only listed IPs) or "blacklist" (block listed IPs).
 	Mode string
-	IPs  []string
+	// IPs is a list of individual IP addresses or CIDR ranges (e.g., "10.0.0.1", "192.168.0.0/24").
+	IPs []string
 }
 
+// UnaryIPFilter returns a gRPC unary server interceptor that allows or blocks
+// requests based on the caller's IP address derived from the peer info in the
+// context. In "whitelist" mode, only listed IPs are allowed; all others receive
+// codes.PermissionDenied. In "blacklist" mode, listed IPs are denied.
 func UnaryIPFilter(cfg GRPCIPFilterConfig) grpc.UnaryServerInterceptor {
 	nets := parseGRPCCIDRs(cfg.IPs)
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {

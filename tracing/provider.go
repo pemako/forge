@@ -12,14 +12,18 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
-// Provider wraps an otel TracerProvider and adds Shutdown.
-// Implements core.Provider.
+// Provider wraps an OpenTelemetry TracerProvider and implements core.Provider.
+// When an OTLP endpoint is configured, it exports spans to the collector.
+// When no endpoint is configured, it uses a no-op provider.
 type Provider struct {
 	tp       trace.TracerProvider
 	shutdown func(context.Context) error
 }
 
-// New creates a Provider. If endpoint is empty, a no-op provider is used.
+// New creates a Provider. If endpoint is empty (or WithEndpoint was not called),
+// a no-op provider is returned and no network connections are made.
+// When endpoint is set, spans are exported via OTLP/HTTP with insecure transport.
+// Defaults: serviceName="service", sampler=1.0.
 func New(opts ...Option) (*Provider, error) {
 	o := options{
 		serviceName: "service",

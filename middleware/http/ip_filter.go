@@ -9,12 +9,20 @@ import (
 	"github.com/pemako/mk/errors"
 )
 
+// IPFilterConfig configures the IP allowlist/blocklist middleware.
 type IPFilterConfig struct {
-	Mode   string
-	IPs    []string
+	// Mode is either "whitelist" (allow only listed IPs) or "blacklist" (block listed IPs).
+	Mode string
+	// IPs is a list of individual IP addresses or CIDR ranges (e.g., "192.168.1.1", "10.0.0.0/8").
+	IPs []string
+	// OnDeny is called when a request is denied. Defaults to returning HTTP 403 Forbidden.
 	OnDeny func(*gin.Context)
 }
 
+// IPFilter returns a Gin middleware that allows or blocks requests based on the
+// client's IP address. In "whitelist" mode, only listed IPs are allowed through;
+// all others receive the OnDeny response. In "blacklist" mode, listed IPs are
+// blocked and all others are allowed through.
 func IPFilter(cfg IPFilterConfig) gin.HandlerFunc {
 	nets := parseCIDRs(cfg.IPs)
 	onDeny := cfg.OnDeny

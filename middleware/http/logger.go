@@ -8,6 +8,9 @@ import (
 	"github.com/pemako/mk/logger"
 )
 
+// Logger returns a Gin middleware that logs each completed request at INFO level.
+// The log entry includes method, path, HTTP status, latency, request_id, and
+// client IP. If log is nil, the process-wide default logger is used.
 func Logger(log core.Logger) gin.HandlerFunc {
 	if log == nil {
 		log = logger.Default()

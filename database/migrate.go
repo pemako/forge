@@ -9,13 +9,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// Migrator wraps goose for a gorm-managed connection.
+// Migrator wraps goose for a GORM-managed database connection.
+// Obtain one with NewMigrator; Manager.Up uses this internally.
 type Migrator struct {
 	db  *gorm.DB
 	dir string
 }
 
-// NewMigrator creates a Migrator for the given gorm.DB and migrations directory.
+// NewMigrator creates a Migrator for the given GORM database and migrations directory.
+// dir should contain goose-compatible SQL migration files.
 func NewMigrator(db *gorm.DB, dir string) *Migrator {
 	return &Migrator{db: db, dir: dir}
 }
@@ -37,8 +39,9 @@ func (m *Migrator) gooseDialect() (string, error) {
 	}
 }
 
-// Up applies all pending migrations.
-// Note: goose v3 uses goose.SetDialect() + goose.UpContext() — no WithDialect option.
+// Up applies all pending migrations in the configured directory in ascending
+// version order. It is safe to call multiple times; already-applied migrations
+// are skipped by goose.
 func (m *Migrator) Up(ctx context.Context) error {
 	db, err := m.sqlDB()
 	if err != nil {
@@ -71,6 +74,7 @@ func (m *Migrator) Down(ctx context.Context) error {
 }
 
 // UpTo applies migrations up to and including the given version number.
+// Useful for controlled rollouts or testing specific migration states.
 func (m *Migrator) UpTo(ctx context.Context, version int64) error {
 	db, err := m.sqlDB()
 	if err != nil {
@@ -86,7 +90,8 @@ func (m *Migrator) UpTo(ctx context.Context, version int64) error {
 	return goose.UpToContext(ctx, db, m.dir, version)
 }
 
-// Status returns the current applied migration version.
+// Status returns the current applied migration version as reported by goose.
+// Returns 0 if no migrations have been applied yet.
 func (m *Migrator) Status(ctx context.Context) (int64, error) {
 	db, err := m.sqlDB()
 	if err != nil {

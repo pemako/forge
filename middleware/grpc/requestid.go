@@ -8,8 +8,13 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+// MetadataRequestID is the gRPC metadata key used to propagate request identifiers.
 const MetadataRequestID = "x-request-id"
 
+// UnaryRequestID is a gRPC unary server interceptor that ensures every RPC has
+// a unique request identifier. If the incoming metadata already contains an
+// x-request-id key, that value is reused; otherwise a new UUID is generated.
+// The identifier is stored in the incoming context metadata for downstream use.
 func UnaryRequestID(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {

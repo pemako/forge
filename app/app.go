@@ -10,10 +10,14 @@ import (
 	"time"
 )
 
+// App is the application lifecycle manager. Create one with New, then call Run.
 type App struct {
 	opts options
 }
 
+// New creates an App with the given options. The following defaults are applied
+// when options are not provided: name="app", version="unknown",
+// shutdownTimeout=30s.
 func New(opts ...Option) *App {
 	o := options{
 		name:            "app",
@@ -26,13 +30,18 @@ func New(opts ...Option) *App {
 	return &App{opts: o}
 }
 
-// Run executes in this order:
-//  1. Migrations (WithMigration)
-//  2. BeforeStart hooks
-//  3. Start all Servers concurrently
-//  4. Block until SIGTERM/SIGINT or server error
-//  5. Stop all Servers (ShutdownTimeout)
-//  6. AfterStop hooks
+// Run starts the application lifecycle and blocks until the process receives
+// SIGTERM or SIGINT, or until a server returns a fatal error.
+// The lifecycle phases executed in order are:
+//  1. Migrations (WithMigration) — Up is called once.
+//  2. BeforeStart hooks — called sequentially; first error aborts startup.
+//  3. All registered Servers are started concurrently.
+//  4. Run blocks until SIGTERM/SIGINT or a server error.
+//  5. All Servers are stopped concurrently within ShutdownTimeout.
+//  6. AfterStop hooks — called sequentially after all servers have stopped.
+//
+// Run returns a non-nil error if any phase fails; the first error encountered
+// is returned. AfterStop errors are only returned if no earlier error occurred.
 func (a *App) Run() error {
 	ctx := context.Background()
 
