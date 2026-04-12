@@ -16,6 +16,9 @@ import (
 	"github.com/pemako/mk/example/internal/service"
 )
 
+// UserHandler exposes HTTP endpoints for the user domain.
+// It demonstrates validate (BindJSON), pagination (FromQuery/New/Offset),
+// auth (Generate/FromContext), and the full service layer.
 type UserHandler struct {
 	svc *service.UserService
 }
@@ -24,6 +27,9 @@ func NewUserHandler(svc *service.UserService) *UserHandler {
 	return &UserHandler{svc: svc}
 }
 
+// RegisterRoutes mounts all user-domain routes on r.
+// The /api/v1/login route is registered separately in main.go so that it
+// appears at the top-level alongside the protected group.
 func (h *UserHandler) RegisterRoutes(r *gin.Engine) {
 	g := r.Group("/api/v1/users")
 	g.POST("", h.Create)
@@ -34,13 +40,13 @@ func (h *UserHandler) RegisterRoutes(r *gin.Engine) {
 
 	posts := r.Group("/api/v1/posts")
 	posts.GET("/:id", h.GetExternalPost)
-
-	r.POST("/api/v1/login", h.Login)
 }
 
+// Create handles POST /api/v1/users.
+// Demonstrates validate.BindJSON for request binding and validation.
 func (h *UserHandler) Create(c *gin.Context) {
 	var req struct {
-		Name  string `json:"name"  validate:"required"`
+		Name  string `json:"name"  validate:"required,min=2,max=64"`
 		Email string `json:"email" validate:"required,email"`
 	}
 	if err := validate.BindJSON(c, &req); err != nil {
@@ -55,6 +61,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, u)
 }
 
+// Get handles GET /api/v1/users/:id.
 func (h *UserHandler) Get(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -69,6 +76,8 @@ func (h *UserHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, u)
 }
 
+// List handles GET /api/v1/users.
+// Demonstrates pagination.FromQuery, pagination.Offset, and pagination.New.
 func (h *UserHandler) List(c *gin.Context) {
 	p := pagination.FromQuery(c)
 	users, err := h.svc.List(c.Request.Context(), pagination.Offset(p), p.PageSize)
@@ -84,6 +93,8 @@ func (h *UserHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, pagination.New(total, users, p))
 }
 
+// GetCached handles GET /api/v1/users/:id/cached.
+// Demonstrates the cache-aside pattern via the service layer.
 func (h *UserHandler) GetCached(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -98,8 +109,8 @@ func (h *UserHandler) GetCached(c *gin.Context) {
 	c.JSON(http.StatusOK, u)
 }
 
-// GetExternalPost proxies GET /api/v1/posts/:id to the JSONPlaceholder API,
-// demonstrating the httpclient named-registry pattern.
+// GetExternalPost handles GET /api/v1/posts/:id.
+// Proxies to JSONPlaceholder, demonstrating httpclient + circuitbreaker.
 func (h *UserHandler) GetExternalPost(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -114,11 +125,11 @@ func (h *UserHandler) GetExternalPost(c *gin.Context) {
 	c.JSON(http.StatusOK, post)
 }
 
-// CreateWithLock creates a user protected by a distributed Redis lock,
-// demonstrating the lock.TryLock API.
+// CreateWithLock handles POST /api/v1/users/locked.
+// Demonstrates the distributed lock pattern via the service layer.
 func (h *UserHandler) CreateWithLock(c *gin.Context) {
 	var req struct {
-		Name  string `json:"name"  validate:"required"`
+		Name  string `json:"name"  validate:"required,min=2,max=64"`
 		Email string `json:"email" validate:"required,email"`
 	}
 	if err := validate.BindJSON(c, &req); err != nil {
@@ -133,8 +144,9 @@ func (h *UserHandler) CreateWithLock(c *gin.Context) {
 	c.JSON(http.StatusCreated, u)
 }
 
-// Login accepts any valid email+password and returns a signed JWT.
-// This is a demo handler — no real credential check is performed.
+// Login handles POST /api/v1/login.
+// Accepts any valid email+password and returns a signed JWT (demo — no
+// real credential check). Demonstrates auth.Generate.
 func (h *UserHandler) Login(c *gin.Context) {
 	var req struct {
 		Email    string `json:"email"    validate:"required,email"`
@@ -158,8 +170,8 @@ func (h *UserHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"token": token})
 }
 
-// GetMe extracts the authenticated user's claims from context and returns them.
-// Requires the auth.Required middleware on the route group.
+// GetMe handles GET /api/v1/me (protected route).
+// Demonstrates auth.FromContext[T] to extract typed JWT claims.
 func (h *UserHandler) GetMe(c *gin.Context) {
 	claims, ok := auth.FromContext[*model.UserClaims](c.Request.Context())
 	if !ok {

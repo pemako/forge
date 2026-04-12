@@ -27,15 +27,26 @@ var (
 )
 
 type UserService struct {
-	repo *repository.UserRepo
-	bus  *event.Bus
-	cb   *circuitbreaker.CircuitBreaker
+	repo   *repository.UserRepo
+	bus    *event.Bus
+	cb     *circuitbreaker.CircuitBreaker
+	locker *lock.Locker
 }
 
-func NewUserService(bus *event.Bus, cb *circuitbreaker.CircuitBreaker) *UserService {
-	return &UserService{repo: &repository.UserRepo{}, bus: bus, cb: cb}
+// NewUserService creates a UserService wired with event bus, circuit breaker,
+// and distributed locker (all demonstrated in this example service).
+func NewUserService(bus *event.Bus, cb *circuitbreaker.CircuitBreaker, locker *lock.Locker) *UserService {
+	return &UserService{
+		repo:   &repository.UserRepo{},
+		bus:    bus,
+		cb:     cb,
+		locker: locker,
+	}
 }
 
+// Create persists a new user, publishes to the in-process event bus (event
+// package) and the cross-instance Redis Stream (stream package), and records
+// Prometheus/OTLP metrics.
 func (s *UserService) Create(ctx context.Context, name, email string) (*model.User, error) {
 	end := metric.StartTimer(ctx, "user_create")
 	defer end()
@@ -48,11 +59,17 @@ func (s *UserService) Create(ctx context.Context, name, email string) (*model.Us
 		return nil, mkerrors.Wrap(mkerrors.ErrInternal, "create user: %w", err)
 	}
 	metric.Count(ctx, "user_created_total", 1)
+
+	// Publish to in-process event bus (event package).
 	_ = s.bus.Publish(ctx, "user.created", u)
+
+	// Publish to Redis Streams for cross-instance fan-out (stream package).
 	_ = stream.Publish(ctx, "user.created", u)
+
 	return u, nil
 }
 
+// Get fetches a single user by primary key.
 func (s *UserService) Get(ctx context.Context, id uint) (*model.User, error) {
 	u, err := s.repo.FindByID(ctx, id)
 	if err != nil {
@@ -64,18 +81,23 @@ func (s *UserService) Get(ctx context.Context, id uint) (*model.User, error) {
 	return u, nil
 }
 
+// List returns a page of users for the given offset/limit (pagination package
+// converts page/page_size to these values in the handler layer).
 func (s *UserService) List(ctx context.Context, offset, limit int) ([]model.User, error) {
 	return s.repo.List(ctx, offset, limit)
 }
 
+// Count returns the total number of users (used by pagination.New in the handler).
 func (s *UserService) Count(ctx context.Context) (int64, error) {
 	return s.repo.Count(ctx)
 }
 
+// GetCached demonstrates the cache-aside pattern using the cache package.
+// It tries the memory cache first; on a miss it queries the DB and back-fills.
 func (s *UserService) GetCached(ctx context.Context, id uint) (*model.User, error) {
 	key := fmt.Sprintf("user:%d", id)
 
-	// Try cache first
+	// Try cache first (cache package — memory backend "default").
 	c := cache.Client("default")
 	if c != nil {
 		if val, err := c.Get(ctx, key); err == nil {
@@ -86,13 +108,13 @@ func (s *UserService) GetCached(ctx context.Context, id uint) (*model.User, erro
 		}
 	}
 
-	// Cache miss — query DB
+	// Cache miss — query DB.
 	u, err := s.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	// Store in cache
+	// Back-fill cache with a 5-minute TTL.
 	if c != nil {
 		if data, jsonErr := json.Marshal(u); jsonErr == nil {
 			_ = c.Set(ctx, key, string(data), 5*time.Minute)
@@ -102,7 +124,7 @@ func (s *UserService) GetCached(ctx context.Context, id uint) (*model.User, erro
 }
 
 // GetExternalPost fetches a post from the JSONPlaceholder API, demonstrating
-// the httpclient named-registry pattern and circuit breaker protection.
+// the httpclient named-registry pattern wrapped in the circuit breaker.
 func (s *UserService) GetExternalPost(ctx context.Context, id int) (map[string]any, error) {
 	c := httpclient.Get("jsonplaceholder")
 	if c == nil {
@@ -121,15 +143,14 @@ func (s *UserService) GetExternalPost(ctx context.Context, id int) (map[string]a
 	return post, nil
 }
 
-// CreateWithLock creates a user guarded by a distributed Redis lock, so that
-// two concurrent requests for the same email cannot both pass the uniqueness
-// check at the same time. This demonstrates the lock.TryLock API.
+// CreateWithLock creates a user guarded by a distributed Redis lock, ensuring
+// that concurrent requests for the same email cannot both pass the uniqueness
+// check simultaneously. Demonstrates the lock package TryLock API.
 func (s *UserService) CreateWithLock(ctx context.Context, name, email string) (*model.User, error) {
-	locker := lock.New("localhost:6379") // in production: use configured Redis address
 	lockKey := "user:email:" + email
 
 	var result *model.User
-	err := locker.TryLock(ctx, lockKey, 10*time.Second,
+	err := s.locker.TryLock(ctx, lockKey, 10*time.Second,
 		func(lockCtx context.Context) error {
 			u, err := s.Create(lockCtx, name, email)
 			if err != nil {

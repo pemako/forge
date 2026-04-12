@@ -17,53 +17,65 @@ database:
     trace_all_sql: true
     slow_threshold: 100ms
 
-logger:
-  level: debug
-  output: both           # stdout + file
-  filename: logs/app     # 实际文件: logs/app.debug.log / .info.log / .warn.log / .error.log
-  max_size: 100          # 单文件最大 MB
-  max_age: 7             # 保留天数
-  max_backups: 10
-
-tracing:
-  endpoint: ""
-
-metric:
-  prometheus_addr: :19091
-
+# cache.default = memory for regular caching
+# cache.redis   = Redis shared by lock + stream
 cache:
   default:
     backend: memory
   redis:
     backend: redis
-    addr: "redis:6379"    # shared for lock + stream
+    addr: "localhost:6379"
     password: ""
     db: 0
 
-httpclient:
-  jsonplaceholder:
-    base_url: "https://jsonplaceholder.typicode.com"
-    timeout: 10s
-    retry: 2
-
-cron:
-  # cron jobs are configured in code, not config file
-
-lock:
-  # lock uses Redis; omit if no Redis configured
+logger:
+  level: debug
+  output: both
+  filename: logs/app
+  max_size: 100
+  max_age: 7
+  max_backups: 10
+  mask_fields:
+    - password
+    - token
 
 auth:
   secret: "example-jwt-secret-change-in-production"
   expire: 24h
 
+tracing:
+  endpoint: "otel-sdk-in.domob-inc.com:14317"
+  sampler: 1.0
+
+metric:
+  prometheus_addr: :19091
+
+# lock uses cache.redis connection (lock.NewFromConfig reads lock.addr)
+lock:
+  addr: "localhost:6379"
+
+# circuitbreaker per-named thresholds
+circuitbreaker:
+  jsonplaceholder:
+    threshold: 3
+    timeout: 10s
+
+# notify channels (leave empty in dev; fill in production)
+notify:
+  dingtalk_webhook: ""
+  wecom_webhook: ""
+  feishu_webhook: ""
+  email:
+    host: ""
+    port: 465
+    username: ""
+    password: ""
+    from: ""
+
+# storage (S3/OSS/COS — disabled in dev)
 storage:
   provider: s3
   region: us-east-1
-  bucket: my-example-bucket
-  access_key: "your-access-key"
-  secret_key: "your-secret-key"
-
-notify:
-  dingtalk_webhook: ""  # set to enable DingTalk notifications
-  wecom_webhook: ""     # set to enable WeCom notifications
-  feishu_webhook: ""    # set to enable Feishu notifications
+  bucket: example-bucket
+  access_key: ""
+  secret_key: ""
