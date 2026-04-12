@@ -4,12 +4,13 @@ import (
 	"context"
 	"net"
 
-	grpcMW "github.com/pemako/mk/middleware/grpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	grpc_health "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+
+	grpcMW "github.com/pemako/mk/middleware/grpc"
 )
 
 type grpcServer struct {

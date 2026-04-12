@@ -27,14 +27,8 @@ func shouldRetryCode(code codes.Code) bool {
 // grpcBackoffDelay returns the wait before attempt n (1-based) with exponential
 // backoff and ±25% jitter, capped at maxDelay.
 func grpcBackoffDelay(attempt int, base, maxDelay time.Duration) time.Duration {
-	shift := attempt - 1
-	if shift > 10 {
-		shift = 10
-	}
-	d := base * (1 << shift)
-	if d > maxDelay {
-		d = maxDelay
-	}
+	shift := min(attempt-1, 10)
+	d := min(base*(1<<shift), maxDelay)
 	jitter := time.Duration(rand.Int64N(int64(d/2+1))) - d/4
 	result := d + jitter
 	if result < 0 {

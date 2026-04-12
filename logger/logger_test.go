@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pemako/mk/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pemako/mk/logger"
 )
 
 func TestLogger_outputsJSON(t *testing.T) {

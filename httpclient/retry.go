@@ -23,14 +23,8 @@ func shouldRetry(resp *http.Response, err error) bool {
 // backoffDelay returns the wait before attempt n (1-based) using exponential
 // backoff with ±25% jitter, capped at maxDelay.
 func backoffDelay(attempt int, base, maxDelay time.Duration) time.Duration {
-	shift := attempt - 1
-	if shift > 10 {
-		shift = 10
-	}
-	d := base * (1 << shift)
-	if d > maxDelay {
-		d = maxDelay
-	}
+	shift := min(attempt-1, 10)
+	d := min(base*(1<<shift), maxDelay)
 	// jitter: uniform in [-d/4, +d/4], result capped at maxDelay
 	jitter := time.Duration(rand.Int64N(int64(d/2+1))) - d/4
 	result := d + jitter

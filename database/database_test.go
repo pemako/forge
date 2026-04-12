@@ -10,7 +10,7 @@ import (
 )
 
 type User struct {
-	ID   uint   `gorm:"primaryKey"`
+	ID   uint `gorm:"primaryKey"`
 	Name string
 }
 

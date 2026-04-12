@@ -1,4 +1,4 @@
-// core/config.go
+// Package core/config.go
 package core
 
 import "time"

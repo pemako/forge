@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	httpserver "github.com/pemako/mk/server/http"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	httpserver "github.com/pemako/mk/server/http"
 )
 
 func TestHTTPServer_healthEndpoints(t *testing.T) {

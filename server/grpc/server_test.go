@@ -5,12 +5,13 @@ import (
 	"testing"
 	"time"
 
-	grpcserver "github.com/pemako/mk/server/grpc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	grpc_health "google.golang.org/grpc/health/grpc_health_v1"
+
+	grpcserver "github.com/pemako/mk/server/grpc"
 )
 
 func TestGRPCServer_healthCheck(t *testing.T) {

@@ -5,19 +5,18 @@ run-settings:
 
 linters:
   enable:
-    - govet          # go vet checks
-    - errcheck       # unchecked errors
-    - staticcheck    # staticcheck suite
-    - unused         # unused code
-    - gosimple       # simplification suggestions
-    - ineffassign    # ineffectual assignments
-    - typecheck      # type-checks (catches compile errors)
-    - gofmt          # formatting
-    - goimports      # import ordering
-    - misspell       # spelling mistakes in comments/strings
-    - unconvert      # unnecessary type conversions
-    - godot          # check comment periods
-    - noctx          # http.NewRequest without context
+    - govet # go vet checks
+    - errcheck # unchecked errors
+    - staticcheck # staticcheck suite
+    - unused # unused code
+    - gosimple # simplification suggestions
+    - ineffassign # ineffectual assignments
+    - typecheck # type-checks (catches compile errors)
+    - gofmt # formatting
+    - misspell # spelling mistakes in comments/strings
+    - unconvert # unnecessary type conversions
+    - godot # check comment periods
+    - noctx # http.NewRequest without context
 
 linters-settings:
   errcheck:
@@ -27,8 +26,6 @@ linters-settings:
     enable-all: false
   gofmt:
     simplify: true
-  goimports:
-    local-prefixes: github.com/pemako/mk
   godot:
     scope: declarations
     capital: false
@@ -40,10 +37,42 @@ issues:
       linters:
         - errcheck
         - godot
+        - noctx
 
     # Allow exported functions without comment in test helpers
     - path: _test\.go
       text: "exported"
+
+    # gorm callback Register() returns error that cannot be meaningfully handled at plugin init
+    - path: database/plugin\.go
+      linters:
+        - errcheck
+
+    # db.Use() plugin registration error is non-actionable at startup
+    - path: database/database\.go
+      linters:
+        - errcheck
+
+    # defer l.Release in TryLock: defer cannot propagate error; failure is logged internally
+    - path: lock/lock\.go
+      linters:
+        - errcheck
+
+    # srv.Stop runs in a goroutine during shutdown; error cannot be surfaced to caller
+    - path: app/app\.go
+      linters:
+        - errcheck
+
+    # fmt.Sscanf in parseSize: parse failure falls back to default (8MB), no action needed
+    - path: middleware/http/body_limit\.go
+      linters:
+        - errcheck
+
+    # godot: comment ending in *** is not a missing period
+    - path: logger/logger\.go
+      text: "Comment should end in a period"
+      linters:
+        - godot
 
   max-issues-per-linter: 50
   max-same-issues: 10

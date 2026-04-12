@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	mw "github.com/pemako/mk/middleware/http"
 	"github.com/stretchr/testify/assert"
+
+	mw "github.com/pemako/mk/middleware/http"
 )
 
 func newTestRouter(handlers ...gin.HandlerFunc) *gin.Engine {

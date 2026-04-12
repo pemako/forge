@@ -36,10 +36,7 @@ func maskValue(s string) string {
 	if n <= 4 {
 		return "***"
 	}
-	keep := n / 4
-	if keep < 2 {
-		keep = 2
-	}
+	keep := max(n/4, 2)
 	return string(r[:keep]) + "***" + string(r[n-keep:])
 }
 

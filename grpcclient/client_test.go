@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
-	grpc_health "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/health"
+	grpc_health "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 func startTestServer(t *testing.T) string {

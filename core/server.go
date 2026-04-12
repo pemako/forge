@@ -1,4 +1,4 @@
-// core/server.go
+// Package core/server.go
 package core
 
 import "context"

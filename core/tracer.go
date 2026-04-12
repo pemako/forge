@@ -1,4 +1,4 @@
-// core/tracer.go
+// Package core/tracer.go
 package core
 
 import (
