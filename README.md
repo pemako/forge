@@ -26,6 +26,10 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 | `auth` | JWT signing/verification and gin middleware (`Required`, `Optional`) with typed claims extraction via generics |
 | `validate` | Request binding + struct validation backed by go-playground/validator; returns structured 400 errors with field-level metadata |
 | `pagination` | Standard page-number pagination params and a typed `Result[T]` response envelope for list endpoints |
+| `event` | In-process pub/sub event bus for decoupling modules; synchronous by default, optional async delivery |
+| `circuitbreaker` | Circuit breaker pattern for protecting outbound calls from cascading failures (Closed → Open → HalfOpen) |
+| `storage` | Unified object storage interface for S3, Alibaba Cloud OSS, and Tencent Cloud COS |
+| `notify` | Multi-channel notification dispatcher: Email (SMTP), SMS, DingTalk, WeCom, and Feishu webhooks |
 
 ## Installation
 
@@ -1023,6 +1027,253 @@ func (h *UserHandler) List(c *gin.Context) {
 
 ---
 
+### `event`
+
+In-process publish/subscribe event bus for decoupling modules without shared state. Events are identified by a string topic. Handlers receive the payload as `any` and type-assert to the expected concrete type.
+
+**Key API**
+
+| Symbol | Description |
+|---|---|
+| `New(opts...) *Bus` | Create an isolated event bus |
+| `Bus.Subscribe(topic, handler)` | Register a `HandlerFunc` for a topic |
+| `Bus.Unsubscribe(topic)` | Remove all handlers for a topic |
+| `Bus.Publish(ctx, topic, payload) error` | Deliver payload to all registered handlers |
+| `Subscribe / Unsubscribe / Publish` | Package-level helpers using the default bus |
+| `WithAsync()` | Deliver events in background goroutines; handler errors are logged, not returned |
+
+**HandlerFunc signature**
+
+```go
+type HandlerFunc func(ctx context.Context, payload any) error
+```
+
+**Usage**
+
+```go
+import "github.com/pemako/mk/event"
+
+bus := event.New()
+
+// Subscribe to an event
+bus.Subscribe("user.registered", func(ctx context.Context, payload any) error {
+    u := payload.(*User)
+    return mailer.SendWelcome(ctx, u.Email)
+})
+
+// Publish an event — blocks until all handlers return (synchronous default)
+err := bus.Publish(ctx, "user.registered", &User{ID: 1, Email: "alice@example.com"})
+
+// Async bus — Publish returns immediately; handler errors are logged
+asyncBus := event.New(event.WithAsync())
+asyncBus.Subscribe("order.placed", handleOrderPlaced)
+asyncBus.Publish(ctx, "order.placed", order) // non-blocking
+```
+
+> Default delivery is synchronous: `Publish` calls handlers in registration order and returns the first non-nil error, stopping the chain. Use `WithAsync` when callers must not block on slow side-effects.
+
+---
+
+### `circuitbreaker`
+
+Protects outbound calls against cascading failures using the circuit breaker pattern. Wraps any operation via `Execute` and tracks consecutive failures.
+
+**State machine**
+
+```
+Closed ──(threshold failures)──► Open ──(timeout elapses)──► HalfOpen ──(probe success)──► Closed
+                                                                         └──(probe failure)──► Open
+```
+
+**Key API**
+
+| Symbol | Description |
+|---|---|
+| `New(name, opts...) *CircuitBreaker` | Create a circuit breaker |
+| `CircuitBreaker.Execute(ctx, fn) error` | Call fn if closed/half-open; returns `ErrOpen` immediately if open |
+| `CircuitBreaker.State() State` | Return current state (`StateClosed`, `StateOpen`, `StateHalfOpen`) |
+| `CircuitBreaker.Reset()` | Force-close the circuit and clear counters |
+| `ErrOpen` | Sentinel returned when the circuit is open |
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `WithThreshold(n)` | `5` | Consecutive failures required to open the circuit |
+| `WithTimeout(d)` | `30s` | How long the circuit stays open before trying half-open |
+| `WithOnStateChange(fn)` | — | Callback invoked on every state transition |
+
+**Usage**
+
+```go
+import (
+    "errors"
+    "github.com/pemako/mk/circuitbreaker"
+)
+
+cb := circuitbreaker.New("payment-service",
+    circuitbreaker.WithThreshold(5),
+    circuitbreaker.WithTimeout(30*time.Second),
+    circuitbreaker.WithOnStateChange(func(name string, from, to circuitbreaker.State) {
+        log.Printf("circuit %s: %s → %s", name, from, to)
+    }),
+)
+
+err := cb.Execute(ctx, func(ctx context.Context) error {
+    return paymentClient.Charge(ctx, req)
+})
+if errors.Is(err, circuitbreaker.ErrOpen) {
+    // Circuit is open — apply fallback or return a service-unavailable error
+    return cachedResult, nil
+}
+```
+
+---
+
+### `storage`
+
+Unified object storage interface for Amazon S3, Alibaba Cloud OSS, and Tencent Cloud COS. All backends implement the same `Storage` interface, so provider migration requires only a config change.
+
+**Key API**
+
+| Symbol | Description |
+|---|---|
+| `New(opts...) (Storage, error)` | Create a storage backend |
+| `Register(name, opts...) error` | Create and store a named backend in the global registry |
+| `Get(name) Storage` | Retrieve a named backend |
+| `Storage.Upload(ctx, key, r, opts...) (string, error)` | Upload from reader; returns public URL |
+| `Storage.Download(ctx, key) (io.ReadCloser, error)` | Download as a ReadCloser (caller must close) |
+| `Storage.Delete(ctx, key) error` | Delete an object (missing keys silently ignored) |
+| `Storage.Exists(ctx, key) (bool, error)` | Check if an object exists |
+| `Storage.PresignURL(ctx, key, expire) (string, error)` | Generate a temporary signed URL |
+
+**Options**
+
+| Option | Description |
+|---|---|
+| `WithProvider(p)` | Backend: `"s3"`, `"oss"`, or `"cos"` |
+| `WithRegion(r)` | Cloud region (e.g. `"us-east-1"`, `"cn-hangzhou"`) |
+| `WithBucket(b)` | Bucket name |
+| `WithAccessKey(key, secret)` | Access key ID and secret |
+| `WithEndpoint(url)` | Custom endpoint for S3-compatible services or private deployments |
+| `WithConfig(cfg)` | Read all settings from `core.Config` |
+
+**Config**
+
+```yaml
+# S3
+storage:
+  provider: s3
+  region: us-east-1
+  bucket: my-bucket
+  access_key: "AKIAIOSFODNN7EXAMPLE"
+  secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+# Alibaba Cloud OSS
+storage:
+  provider: oss
+  region: cn-hangzhou
+  bucket: my-bucket
+  access_key: "your-access-key-id"
+  secret_key: "your-access-key-secret"
+  endpoint: "https://oss-cn-hangzhou.aliyuncs.com"
+
+# Tencent Cloud COS
+storage:
+  provider: cos
+  region: ap-guangzhou
+  bucket: my-bucket-1234567890
+  access_key: "your-secret-id"
+  secret_key: "your-secret-key"
+```
+
+**Usage**
+
+```go
+import "github.com/pemako/mk/storage"
+
+store, err := storage.New(
+    storage.WithProvider("s3"),
+    storage.WithRegion("us-east-1"),
+    storage.WithBucket("my-bucket"),
+    storage.WithAccessKey("key-id", "secret"),
+)
+if err != nil {
+    panic(err)
+}
+
+// Upload a file
+url, err := store.Upload(ctx, "avatars/user-1.jpg", reader,
+    storage.WithContentType("image/jpeg"),
+)
+
+// Generate a pre-signed download URL valid for 1 hour
+presigned, err := store.PresignURL(ctx, "avatars/user-1.jpg", time.Hour)
+```
+
+---
+
+### `notify`
+
+Multi-channel notification dispatcher. Configure one or more channels at startup; then call `Send` with a `Message` specifying which channels to use.
+
+**Key API**
+
+| Symbol | Description |
+|---|---|
+| `New(opts...) (*Notifier, error)` | Create a Notifier with configured channels |
+| `Notifier.Send(ctx, msg) error` | Dispatch the message; returns first error |
+| `Message` | Notification payload: `To`, `Subject`, `Body`, `Channels` |
+| `Email`, `SMS`, `DingTalk`, `WeCom`, `Feishu` | `Channel` constants |
+
+**Options**
+
+| Option | Description |
+|---|---|
+| `WithEmail(EmailConfig)` | Register Email via SMTP (`Host`, `Port`, `Username`, `Password`) |
+| `WithSMS(SMSConfig)` | Register SMS via Alibaba Cloud (`AccessKey`, `SecretKey`, `SignName`, `TemplateCode`) |
+| `WithDingTalk(webhookURL)` | Register DingTalk robot webhook |
+| `WithWeCom(webhookURL)` | Register WeChat Work robot webhook |
+| `WithFeishu(webhookURL)` | Register Feishu (Lark) robot webhook |
+
+**Usage**
+
+```go
+import "github.com/pemako/mk/notify"
+
+n, err := notify.New(
+    notify.WithEmail(notify.EmailConfig{
+        Host:     "smtp.example.com",
+        Port:     465,
+        Username: "no-reply@example.com",
+        Password: "smtp-password",
+    }),
+    notify.WithDingTalk("https://oapi.dingtalk.com/robot/send?access_token=xxx"),
+    notify.WithWeCom("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"),
+    notify.WithFeishu("https://open.feishu.cn/open-apis/bot/v2/hook/xxx"),
+)
+if err != nil {
+    panic(err)
+}
+
+// Send to specific channels
+err = n.Send(ctx, notify.Message{
+    To:      []string{"ops@example.com"},
+    Subject: "Deployment alert",
+    Body:    "## Deploy succeeded\nService `my-service` v1.2.3 is live.",
+    Channels: []notify.Channel{notify.Email, notify.DingTalk},
+})
+
+// Send to all configured channels (omit Channels field)
+err = n.Send(ctx, notify.Message{
+    Body: "Heartbeat check passed",
+})
+```
+
+> Webhook channels (DingTalk, WeCom, Feishu) use HTTP POST with a JSON body — no SDK or credential setup beyond the webhook URL is required.
+
+---
+
 ## Middleware Reference
 
 ### HTTP Middleware (`middleware/http`)
@@ -1324,6 +1575,22 @@ github.com/pemako/mk/
 │   └── validate.go         # Bind, BindJSON, BindForm, BindQuery, BindURI, Struct, Register
 ├── pagination/             # Page-number pagination helpers
 │   └── pagination.go       # Params, Result[T], FromQuery, FromParams, Offset, New
+├── event/                  # In-process pub/sub event bus
+│   └── event.go            # Bus, New, Subscribe, Unsubscribe, Publish, WithAsync, default bus
+├── circuitbreaker/         # Circuit breaker pattern
+│   ├── circuitbreaker.go   # CircuitBreaker, New, Execute, State, Reset, ErrOpen
+│   └── options.go          # WithThreshold, WithTimeout, WithOnStateChange
+├── storage/                # Unified object storage (S3 / OSS / COS)
+│   ├── storage.go          # Storage interface, New, Register, Get, WithProvider/Region/Bucket/...
+│   ├── s3.go               # Amazon S3 backend
+│   ├── oss.go              # Alibaba Cloud OSS backend
+│   └── cos.go              # Tencent Cloud COS backend
+├── notify/                 # Multi-channel notification dispatcher
+│   ├── notify.go           # Notifier, New, Send, Message, Channel constants
+│   ├── options.go          # WithEmail, WithSMS, WithDingTalk, WithWeCom, WithFeishu
+│   ├── email.go            # SMTP sender
+│   ├── sms.go              # Alibaba Cloud SMS sender
+│   └── webhook.go          # DingTalk / WeCom / Feishu webhook sender
 └── example/                # Runnable reference application
     ├── main.go
     ├── config.yaml

@@ -8,9 +8,11 @@ import (
 	"github.com/pemako/mk/app"
 	"github.com/pemako/mk/auth"
 	"github.com/pemako/mk/cache"
+	"github.com/pemako/mk/circuitbreaker"
 	"github.com/pemako/mk/config"
 	"github.com/pemako/mk/cron"
 	"github.com/pemako/mk/database"
+	"github.com/pemako/mk/event"
 	"github.com/pemako/mk/grpcclient"
 	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/logger"
@@ -69,6 +71,20 @@ func main() {
 		httpclient.WithRetry(2),
 	)
 
+	// Event bus — subscribe to domain events
+	bus := event.New()
+	bus.Subscribe("user.created", func(ctx context.Context, payload any) error {
+		u := payload.(*model.User)
+		logger.Info(ctx, "user created event", logger.F("user_id", u.ID))
+		return nil
+	})
+
+	// Circuit breaker — protect the external JSONPlaceholder HTTP call
+	cb := circuitbreaker.New("jsonplaceholder",
+		circuitbreaker.WithThreshold(3),
+		circuitbreaker.WithTimeout(10*time.Second),
+	)
+
 	// HTTP server
 	httpSrv, err := httpserver.New(
 		httpserver.WithConfig(cfg),
@@ -88,7 +104,7 @@ func main() {
 	}
 
 	// Register HTTP routes
-	userSvc := service.NewUserService()
+	userSvc := service.NewUserService(bus, cb)
 	userHandler := httphandler.NewUserHandler(userSvc)
 	r := httpSrv.Engine()
 

@@ -50,3 +50,15 @@ lock:
 auth:
   secret: "example-jwt-secret-change-in-production"
   expire: 24h
+
+storage:
+  provider: s3
+  region: us-east-1
+  bucket: my-example-bucket
+  access_key: "your-access-key"
+  secret_key: "your-secret-key"
+
+notify:
+  dingtalk_webhook: ""  # set to enable DingTalk notifications
+  wecom_webhook: ""     # set to enable WeCom notifications
+  feishu_webhook: ""    # set to enable Feishu notifications

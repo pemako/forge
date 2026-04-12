@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/pemako/mk/cache"
+	"github.com/pemako/mk/circuitbreaker"
 	mkerrors "github.com/pemako/mk/errors"
+	"github.com/pemako/mk/event"
 	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/metric"
@@ -25,10 +27,12 @@ var (
 
 type UserService struct {
 	repo *repository.UserRepo
+	bus  *event.Bus
+	cb   *circuitbreaker.CircuitBreaker
 }
 
-func NewUserService() *UserService {
-	return &UserService{repo: &repository.UserRepo{}}
+func NewUserService(bus *event.Bus, cb *circuitbreaker.CircuitBreaker) *UserService {
+	return &UserService{repo: &repository.UserRepo{}, bus: bus, cb: cb}
 }
 
 func (s *UserService) Create(ctx context.Context, name, email string) (*model.User, error) {
@@ -43,6 +47,7 @@ func (s *UserService) Create(ctx context.Context, name, email string) (*model.Us
 		return nil, mkerrors.Wrap(mkerrors.ErrInternal, "create user: %w", err)
 	}
 	metric.Count(ctx, "user_created_total", 1)
+	_ = s.bus.Publish(ctx, "user.created", u)
 	return u, nil
 }
 
@@ -95,14 +100,19 @@ func (s *UserService) GetCached(ctx context.Context, id uint) (*model.User, erro
 }
 
 // GetExternalPost fetches a post from the JSONPlaceholder API, demonstrating
-// the httpclient named-registry pattern.
+// the httpclient named-registry pattern and circuit breaker protection.
 func (s *UserService) GetExternalPost(ctx context.Context, id int) (map[string]any, error) {
 	c := httpclient.Get("jsonplaceholder")
 	if c == nil {
 		return nil, mkerrors.ErrInternal
 	}
 	var post map[string]any
-	err := c.Get(ctx, fmt.Sprintf("/posts/%d", id), &post)
+	err := s.cb.Execute(ctx, func(ctx context.Context) error {
+		return c.Get(ctx, fmt.Sprintf("/posts/%d", id), &post)
+	})
+	if errors.Is(err, circuitbreaker.ErrOpen) {
+		return nil, mkerrors.Define(503, "SERVICE_UNAVAILABLE", "external service temporarily unavailable")
+	}
 	if err != nil {
 		return nil, mkerrors.Wrap(mkerrors.ErrInternal, "fetch external post: %w", err)
 	}

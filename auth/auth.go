@@ -51,7 +51,7 @@ func Required(opts ...Option) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr := extractToken(c)
 		if tokenStr == "" {
-			c.Error(mkerrors.Define(401, "MISSING_TOKEN", "authorization token required"))
+			_ = c.Error(mkerrors.Define(401, "MISSING_TOKEN", "authorization token required"))
 			c.Abort()
 			return
 		}
@@ -59,7 +59,7 @@ func Required(opts ...Option) gin.HandlerFunc {
 		if err != nil {
 			o.log.Debug(c.Request.Context(), "auth: invalid token",
 				core.Field{Key: "err", Value: err.Error()})
-			c.Error(mkerrors.Define(401, "INVALID_TOKEN", "invalid or expired token"))
+			_ = c.Error(mkerrors.Define(401, "INVALID_TOKEN", "invalid or expired token"))
 			c.Abort()
 			return
 		}
