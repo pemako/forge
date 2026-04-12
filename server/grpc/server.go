@@ -85,6 +85,15 @@ func New(opts ...Option) (*grpcServer, error) {
 // service implementations after server creation.
 func (g *grpcServer) Server() *grpc.Server { return g.s }
 
+// Addr returns the address the server is listening on.
+// Useful in tests when using ":0" for a random port.
+func (g *grpcServer) Addr() string {
+	if g.lis != nil {
+		return g.lis.Addr().String()
+	}
+	return g.opts.addr
+}
+
 // Start begins accepting gRPC connections and blocks until the server is stopped.
 // It implements core.Server.
 func (g *grpcServer) Start(_ context.Context) error { return g.s.Serve(g.lis) }

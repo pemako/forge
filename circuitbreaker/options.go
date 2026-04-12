@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/pemako/mk/core"
+	"github.com/pemako/mk/logger"
 )
 
 type options struct {
@@ -11,6 +12,7 @@ type options struct {
 	timeout       time.Duration
 	onStateChange func(name string, from, to State)
 	cfg           core.Config // set by WithConfig; applied in New using the breaker name
+	log           core.Logger
 }
 
 // Option configures a CircuitBreaker at construction time.
@@ -42,7 +44,13 @@ func WithOnStateChange(fn func(name string, from, to State)) Option {
 }
 
 func defaultOptions() options {
-	return options{threshold: 5, timeout: 30 * time.Second}
+	return options{threshold: 5, timeout: 30 * time.Second, log: logger.Default()}
+}
+
+// WithLogger sets the logger used for circuit state-change messages.
+// Defaults to logger.Default() when not provided.
+func WithLogger(l core.Logger) Option {
+	return func(o *options) { o.log = l }
 }
 
 // WithConfig reads circuit breaker settings for the named breaker from cfg.

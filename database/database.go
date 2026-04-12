@@ -70,6 +70,19 @@ func New(opts ...Option) (*Manager, error) {
 	return &Manager{opts: o}, nil
 }
 
+// Register is a convenience function that creates a single named database
+// connection and registers it in the global registry.
+// It is equivalent to New(WithDriver(name, driver, dsn), opts...).
+//
+// Example:
+//
+//	database.Register("default", "sqlite", "file::memory:", database.WithLogger(log))
+//	db := database.DB("default")
+func Register(name, driver, dsn string, opts ...Option) error {
+	_, err := New(append([]Option{WithDriver(name, driver, dsn)}, opts...)...)
+	return err
+}
+
 // DB returns the *gorm.DB for the named connection from the global registry,
 // or nil if the name has not been registered. Connections are registered
 // by New and are available to any package without further configuration.

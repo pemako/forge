@@ -1,0 +1,7 @@
+database:
+  default:
+    driver: sqlite
+    dsn: "file::memory:?cache=shared&_cfgdefault"
+    max_open_conns: 5
+    max_idle_conns: 2
+    trace_all_sql: true

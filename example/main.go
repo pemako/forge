@@ -31,6 +31,8 @@ import (
 	"github.com/pemako/mk/storage"
 	"github.com/pemako/mk/stream"
 	"github.com/pemako/mk/tracing"
+
+	"github.com/pemako/mk/pprof"
 )
 
 func main() {
@@ -285,6 +287,20 @@ func main() {
 		servers = append(servers, stream.Worker(log))
 	}
 
+	// pprof: two modes depending on deployment scenario.
+	//
+	// Mode 1 — standalone server on localhost:6060 (public-facing services,
+	// strict isolation; access via `kubectl port-forward` or SSH tunnel):
+	//   servers = append(servers, pprof.New())
+	//
+	// Mode 2 — mounted on the existing HTTP server (internal-only services,
+	// no extra port needed):
+	//   pprof.Register(httpSrv.Engine())
+	//
+	// Enable mutex/block profiling when diagnosing lock contention:
+	//   pprof.New(pprof.WithMutexFraction(1), pprof.WithBlockRate(1))
+	servers = append(servers, pprof.New())
+
 	if err := app.New(
 		app.WithName(cfg.GetString("app.name")),
 		app.WithVersion(cfg.GetString("app.version")),
@@ -292,7 +308,7 @@ func main() {
 		app.WithLogger(log),
 		app.WithMigration(dbMgr),
 		app.WithBeforeStart(func(ctx context.Context) error {
-			httpserver.SetReady(true)
+			httpSrv.SetReady(true)
 			log.Info(ctx, "service ready",
 				logger.F("http", cfg.GetString("server.http.addr")),
 				logger.F("grpc", cfg.GetString("server.grpc.addr")),
@@ -302,7 +318,9 @@ func main() {
 		}),
 		app.WithAfterStop(func(ctx context.Context) error {
 			cache.CloseAll() //nolint:errcheck
-			metric.Shutdown()
+			if err := metric.Shutdown(ctx); err != nil {
+				return err
+			}
 			return provider.Shutdown(ctx)
 		}),
 	).Run(); err != nil {

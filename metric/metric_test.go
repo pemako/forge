@@ -19,7 +19,7 @@ func TestInit_prometheusEndpoint(t *testing.T) {
 		metric.WithPrometheusAddr(":19091"),
 	)
 	require.NoError(t, err)
-	t.Cleanup(metric.Shutdown)
+	t.Cleanup(func() { metric.Shutdown(context.Background()) })
 
 	time.Sleep(80 * time.Millisecond)
 

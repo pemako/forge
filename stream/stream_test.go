@@ -106,3 +106,29 @@ func TestMessage_Decode(t *testing.T) {
 	require.NoError(t, msg.Decode(&e))
 	assert.Equal(t, 99, e.OrderID)
 }
+
+func TestBus_isolated(t *testing.T) {
+	rdb := newTestRedis(t)
+	bus := stream.New(rdb)
+
+	var count atomic.Int32
+	bus.Subscribe("isolated.topic",
+		stream.WithGroup("test-group"),
+		stream.WithConsumer("instance-1"),
+		stream.WithHandler(func(_ context.Context, msg stream.Message) error {
+			count.Add(1)
+			return nil
+		}),
+	)
+
+	w := bus.Worker()
+	ctx, cancel := context.WithCancel(context.Background())
+	go w.Start(ctx)
+	defer w.Stop(ctx)
+	defer cancel()
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, bus.Publish(context.Background(), "isolated.topic", map[string]any{"x": 1}))
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, int32(1), count.Load())
+}

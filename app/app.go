@@ -8,6 +8,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/pemako/mk/core"
 )
 
 // App is the application lifecycle manager. Create one with New, then call Run.
@@ -30,6 +32,13 @@ func New(opts ...Option) *App {
 	return &App{opts: o}
 }
 
+// log emits a structured Info log if a logger is configured.
+func (a *App) log(ctx context.Context, msg string, fields ...core.Field) {
+	if a.opts.logger != nil {
+		a.opts.logger.Info(ctx, msg, fields...)
+	}
+}
+
 // Run starts the application lifecycle and blocks until the process receives
 // SIGTERM or SIGINT, or until a server returns a fatal error.
 // The lifecycle phases executed in order are:
@@ -49,6 +58,7 @@ func (a *App) Run() error {
 		if err := a.opts.migrator.Up(ctx); err != nil {
 			return fmt.Errorf("migration: %w", err)
 		}
+		a.log(ctx, "app: migrations complete")
 	}
 
 	for _, fn := range a.opts.beforeStart {
@@ -56,6 +66,8 @@ func (a *App) Run() error {
 			return fmt.Errorf("before start: %w", err)
 		}
 	}
+
+	a.log(ctx, "app: starting servers", core.Field{Key: "count", Value: len(a.opts.servers)})
 
 	errCh := make(chan error, len(a.opts.servers)+1)
 	var startWg sync.WaitGroup
@@ -79,6 +91,7 @@ func (a *App) Run() error {
 	case err := <-errCh:
 		runErr = fmt.Errorf("server error: %w", err)
 	case <-quit:
+		a.log(ctx, "app: shutdown signal received, stopping...")
 	}
 
 	stopCtx, cancel := context.WithTimeout(ctx, a.opts.shutdownTimeout)
@@ -100,6 +113,8 @@ func (a *App) Run() error {
 	case <-stopCtx.Done():
 	}
 
+	a.log(ctx, "app: servers stopped")
+
 	// Wait for all Start goroutines to finish so callers see consistent state.
 	startWg.Wait()
 
@@ -108,6 +123,8 @@ func (a *App) Run() error {
 			runErr = fmt.Errorf("after stop: %w", err)
 		}
 	}
+
+	a.log(ctx, "app: shutdown complete")
 
 	return runErr
 }

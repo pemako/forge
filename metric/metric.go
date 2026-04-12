@@ -80,13 +80,19 @@ func Init(opts ...Option) error {
 // Shutdown flushes any pending metric data, stops the Prometheus HTTP server
 // if one was started, and releases exporter resources. Register this with
 // app.WithAfterStop to ensure metrics are flushed on graceful shutdown.
-func Shutdown() {
+func Shutdown(ctx context.Context) error {
+	var first error
 	if globalProvider != nil {
-		globalProvider.Shutdown(context.Background()) //nolint:errcheck
+		if err := globalProvider.Shutdown(ctx); err != nil && first == nil {
+			first = err
+		}
 	}
 	if promSrv != nil {
-		promSrv.Shutdown(context.Background()) //nolint:errcheck
+		if err := promSrv.Shutdown(ctx); err != nil && first == nil {
+			first = err
+		}
 	}
+	return first
 }
 
 func otlpHost(raw string) string {

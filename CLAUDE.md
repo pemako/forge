@@ -29,12 +29,165 @@ golangci-lint run ./...
 cd example && go build ./... && go run .
 ```
 
+## After completing any package work
+
+After finishing any task that adds or modifies a package — before considering the work done — always run this checklist without being asked:
+
+1. **`CLAUDE.md`** — does the Package inventory list need updating? Are there new patterns, conventions, or cross-package rules introduced by this change?
+2. **`README.md`** — does the Features table or Package Reference section need a new row or updated description?
+3. **`example/`** — does the example service demonstrate the new or changed API? Add or update `example/` code to show the key usage.
+
+If any of the three are stale, update them as part of the same task. Do not wait to be asked.
+
 ## Adding a new package
 
 Every new package requires three steps — always do all three before committing:
 1. Add complete godoc (package-level comment + all exported identifiers)
 2. Update `README.md` (Features table + Package Reference section)
 3. Update `example/` to demonstrate the new package's key API
+
+### New package checklist
+
+Before writing any code, verify:
+- [ ] Does the package need a `core/` interface? (yes if other packages will depend on it, or if it needs to be mockable in tests)
+- [ ] Does it manage shared state? → use named registry pattern (`Register` / `Get`)
+- [ ] Does it hold a long-running goroutine? → implement `core.Server` (`Start` blocks, `Stop` unblocks)
+- [ ] Does it need Redis? → get client from `cache.RedisClient("name")`, never open a new connection directly
+
+### Mandatory file layout
+
+```
+newpkg/
+  newpkg.go    ← package doc comment + main types + constructors
+  options.go   ← options struct, Option type, all WithXxx funcs
+  newpkg_test.go
+```
+
+Split into additional files only when a single file exceeds ~300 lines.
+
+### Constructor shape — copy this exactly
+
+```go
+// newpkg/options.go
+
+type options struct {
+    cfg    core.Config
+    log    core.Logger
+    // package-specific fields ...
+}
+
+type Option func(*options)
+
+// WithConfig reads package settings from cfg under the "newpkg.*" key prefix.
+// Explicit options applied after WithConfig override config values.
+func WithConfig(cfg core.Config) Option {
+    return func(o *options) {
+        o.cfg = cfg
+        if v := cfg.GetString("newpkg.xxx"); v != "" {
+            o.xxx = v
+        }
+    }
+}
+
+// WithLogger sets the logger. Defaults to logger.Default() when not provided.
+func WithLogger(l core.Logger) Option {
+    return func(o *options) { o.log = l }
+}
+
+func defaultOptions() options {
+    return options{log: logger.Default()}
+}
+```
+
+```go
+// newpkg/newpkg.go
+
+// New creates a Xxx with the given options.
+// Returns an error if required configuration (e.g. address) is missing.
+func New(opts ...Option) (*Xxx, error) {
+    o := defaultOptions()
+    for _, opt := range opts {
+        opt(&o)
+    }
+    // validate required fields here
+    return &Xxx{opts: o}, nil
+}
+```
+
+### Named registry — use when multiple named instances are needed
+
+```go
+var (
+    registry   = map[string]*Xxx{}
+    registryMu sync.RWMutex
+)
+
+func Register(name string, opts ...Option) error {
+    x, err := New(opts...)
+    if err != nil {
+        return err
+    }
+    registryMu.Lock()
+    registry[name] = x
+    registryMu.Unlock()
+    return nil
+}
+
+func Get(name string) *Xxx {
+    registryMu.RLock()
+    defer registryMu.RUnlock()
+    return registry[name]
+}
+```
+
+### core.Server — implement when the package owns a blocking goroutine
+
+```go
+func (x *Xxx) Start(_ context.Context) error {
+    // start background work
+    <-x.done          // block until Stop is called
+    return nil
+}
+
+func (x *Xxx) Stop(ctx context.Context) error {
+    close(x.done)
+    // wait for in-flight work with ctx deadline
+    return nil
+}
+```
+
+### Sentinel errors — define at package level
+
+```go
+var (
+    ErrNotFound = errors.Define(404, "NEWPKG_NOT_FOUND", "resource not found")
+    ErrConflict = errors.Define(409, "NEWPKG_CONFLICT", "resource conflict")
+)
+```
+
+Never return raw `fmt.Errorf` from public functions — always wrap a sentinel or use `errors.Wrap`.
+
+### Test requirements for every new package
+
+- Minimum 60% statement coverage
+- Use `github.com/stretchr/testify/assert` and `require`
+- For packages with network I/O: use an in-process fake or `testcontainers` — never skip or mock the real protocol
+- Tests that start a server must use a random port (`":0"`) to avoid conflicts:
+
+```go
+ln, err := net.Listen("tcp", ":0")
+addr := ln.Addr().String()
+```
+
+- Tests must not rely on or mutate package-level globals. If the package has global state, provide a `reset()` helper used only in tests.
+
+### Import rules
+
+- `core/` packages may not import any other `mk` package
+- `errors/` may not import any other `mk` package
+- Infrastructure packages (`cache`, `lock`, `stream`, …) may import `core/`, `errors/`, `logger/`
+- Never introduce a circular import — check with `go build ./...` before committing
+- New packages must not import `server/http`, `server/grpc`, `middleware/*`, or `app` (those are consumers, not libraries)
 
 ## Architecture
 
@@ -66,6 +219,7 @@ pagination/      ← Params, Result[T], FromQuery, Offset, New[T]
 circuitbreaker/  ← three-state circuit breaker (Closed/Open/HalfOpen); Execute(ctx, fn)
 storage/         ← Storage interface; S3 / Alibaba OSS / Tencent COS backends
 notify/          ← Email(SMTP) / SMS(Aliyun) / DingTalk / WeCom / Feishu notification channels
+pprof/           ← pprof profiling endpoints; standalone server (core.Server) or Register on existing gin.Engine
 ```
 
 ### Key patterns used everywhere

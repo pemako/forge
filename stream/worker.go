@@ -11,6 +11,7 @@ import (
 )
 
 type streamWorker struct {
+	bus  *Bus
 	done chan struct{}
 	log  core.Logger
 	wg   sync.WaitGroup // tracks in-flight process() calls
@@ -18,20 +19,20 @@ type streamWorker struct {
 
 // Start implements core.Server. It blocks until Stop is called.
 func (w *streamWorker) Start(ctx context.Context) error {
-	if rdb == nil {
+	if w.bus == nil || w.bus.rdb == nil {
 		return fmt.Errorf("stream: not initialized — call stream.Init before Worker.Start")
 	}
 
-	mu.RLock()
-	localSubs := make([]subscription, len(subs))
-	copy(localSubs, subs)
-	mu.RUnlock()
+	w.bus.mu.RLock()
+	localSubs := make([]subscription, len(w.bus.subs))
+	copy(localSubs, w.bus.subs)
+	w.bus.mu.RUnlock()
 
 	var wg sync.WaitGroup
 	for _, sub := range localSubs {
 		sub := sub
 		// Ensure the consumer group exists; ignore BUSYGROUP error (already exists).
-		err := rdb.XGroupCreateMkStream(ctx, sub.topic, sub.group, "0").Err()
+		err := w.bus.rdb.XGroupCreateMkStream(ctx, sub.topic, sub.group, "0").Err()
 		if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 			w.log.Warn(ctx, "stream: create group",
 				core.Field{Key: "topic", Value: sub.topic},
@@ -79,7 +80,7 @@ func (w *streamWorker) consume(sub subscription) {
 		default:
 		}
 
-		result, err := rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+		result, err := w.bus.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group:    sub.group,
 			Consumer: sub.consumer,
 			Streams:  []string{sub.topic, ">"},
@@ -144,7 +145,7 @@ func (w *streamWorker) process(ctx context.Context, sub subscription, xmsg redis
 			)
 			continue
 		}
-		rdb.XAck(ctx, sub.topic, sub.group, xmsg.ID)
+		w.bus.rdb.XAck(ctx, sub.topic, sub.group, xmsg.ID)
 		return
 	}
 
@@ -154,7 +155,7 @@ func (w *streamWorker) process(ctx context.Context, sub subscription, xmsg redis
 		core.Field{Key: "msg_id", Value: msg.ID},
 		core.Field{Key: "err", Value: lastErr.Error()},
 	)
-	rdb.XAdd(ctx, &redis.XAddArgs{
+	w.bus.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: sub.topic + ":dead",
 		MaxLen: 1000,
 		Approx: true,
@@ -164,5 +165,5 @@ func (w *streamWorker) process(ctx context.Context, sub subscription, xmsg redis
 			"error":       lastErr.Error(),
 		},
 	})
-	rdb.XAck(ctx, sub.topic, sub.group, xmsg.ID)
+	w.bus.rdb.XAck(ctx, sub.topic, sub.group, xmsg.ID)
 }

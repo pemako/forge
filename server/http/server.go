@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,9 +12,10 @@ import (
 )
 
 type ginServer struct {
-	opts options
-	r    *gin.Engine
-	srv  *http.Server
+	opts  options
+	r     *gin.Engine
+	srv   *http.Server
+	ready atomic.Bool
 }
 
 // New creates a new HTTP server with the default middleware stack pre-mounted.
@@ -49,7 +51,6 @@ func New(opts ...Option) (*ginServer, error) {
 
 	// Health routes — no auth, registered before business routes
 	r.GET("/healthz", healthzHandler(o.serviceName, o.serviceVersion))
-	r.GET("/readyz", readyzHandler(o.serviceName, o.serviceVersion))
 	r.GET("/health", healthzHandler(o.serviceName, o.serviceVersion))
 
 	s := &ginServer{
@@ -62,17 +63,38 @@ func New(opts ...Option) (*ginServer, error) {
 			WriteTimeout: o.writeTimeout,
 		},
 	}
+
+	// Register /readyz after s is created so the closure captures the instance.
+	r.GET("/readyz", readyzHandler(o.serviceName, o.serviceVersion, func() bool {
+		return s.ready.Load()
+	}))
+
 	return s, nil
 }
+
+// SetReady marks this server instance as ready to serve traffic.
+// Call after database migrations and startup checks complete.
+// Affects the /readyz endpoint on this server instance only.
+func (s *ginServer) SetReady(ready bool) { s.ready.Store(ready) }
 
 // Engine returns the underlying *gin.Engine so callers can register
 // application-specific routes and middleware after server creation.
 func (s *ginServer) Engine() *gin.Engine { return s.r }
 
+// Addr returns the address the server is listening on.
+func (s *ginServer) Addr() string { return s.srv.Addr }
+
 // Start begins listening on the configured address and blocks until the server
 // is stopped. It implements core.Server.
 func (s *ginServer) Start(_ context.Context) error {
-	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	var err error
+	if s.opts.listener != nil {
+		s.srv.Addr = s.opts.listener.Addr().String()
+		err = s.srv.Serve(s.opts.listener)
+	} else {
+		err = s.srv.ListenAndServe()
+	}
+	if err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	return nil

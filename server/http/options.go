@@ -8,6 +8,7 @@
 package httpserver
 
 import (
+	"net"
 	"time"
 
 	"github.com/pemako/mk/core"
@@ -21,6 +22,7 @@ type options struct {
 	logger         core.Logger
 	serviceName    string
 	serviceVersion string
+	listener       net.Listener
 }
 
 // Option is a functional option for configuring the HTTP server.
@@ -48,6 +50,13 @@ func WithReadTimeout(d time.Duration) Option { return func(o *options) { o.readT
 // WithWriteTimeout sets the maximum duration before timing out writes of the
 // response. Defaults to 30 seconds.
 func WithWriteTimeout(d time.Duration) Option { return func(o *options) { o.writeTimeout = d } }
+
+// WithListener sets an explicit net.Listener for the server to use instead of
+// opening a new TCP socket. When set, Start calls srv.Serve(lis) instead of
+// srv.ListenAndServe, which allows using ":0" (random port) in tests.
+func WithListener(lis net.Listener) Option {
+	return func(o *options) { o.listener = lis }
+}
 
 // WithConfig reads HTTP server settings from core.Config:
 // server.http.addr (addr), server.http.timeout (read+write timeout),

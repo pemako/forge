@@ -2,6 +2,7 @@ package httpserver_test
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -13,8 +14,11 @@ import (
 )
 
 func TestHTTPServer_healthEndpoints(t *testing.T) {
+	lis, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+
 	srv, err := httpserver.New(
-		httpserver.WithAddr(":18080"),
+		httpserver.WithListener(lis),
 		httpserver.WithServiceName("test-svc"),
 		httpserver.WithServiceVersion("v1"),
 	)
@@ -25,6 +29,8 @@ func TestHTTPServer_healthEndpoints(t *testing.T) {
 	time.Sleep(80 * time.Millisecond)
 	defer srv.Stop(ctx)
 
+	base := "http://" + lis.Addr().String()
+
 	for _, tc := range []struct {
 		path       string
 		wantStatus int
@@ -33,14 +39,14 @@ func TestHTTPServer_healthEndpoints(t *testing.T) {
 		{"/health", 200},
 		{"/readyz", 503},
 	} {
-		resp, err := http.Get("http://localhost:18080" + tc.path)
+		resp, err := http.Get(base + tc.path)
 		require.NoError(t, err, tc.path)
 		assert.Equal(t, tc.wantStatus, resp.StatusCode, tc.path)
 	}
 
-	httpserver.SetReady(true)
-	defer httpserver.SetReady(false)
-	resp, err := http.Get("http://localhost:18080/readyz")
+	srv.SetReady(true)
+	defer srv.SetReady(false)
+	resp, err := http.Get(base + "/readyz")
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
 }

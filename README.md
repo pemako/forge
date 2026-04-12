@@ -31,6 +31,7 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 | `storage` | Unified object storage interface for S3, Alibaba Cloud OSS, and Tencent Cloud COS |
 | `notify` | Multi-channel notification dispatcher: Email (SMTP), SMS, DingTalk, WeCom, and Feishu webhooks |
 | `stream` | Distributed pub/sub and work-queue messaging backed by Redis Streams (XADD / XREADGROUP) |
+| `pprof` | pprof profiling endpoints; standalone server on a dedicated port or mounted on an existing gin.Engine |
 
 ## Installation
 
@@ -1733,6 +1734,9 @@ github.com/pemako/mk/
 │   ├── stream.go           # Init, Publish, Subscribe, Worker, Message, ResetSubs
 │   ├── options.go          # InitOption, SubOption, WithGroup, WithBroadcast, WithHandler, etc.
 │   └── worker.go           # streamWorker implementing core.Server
+├── pprof/                  # pprof profiling endpoints
+│   ├── pprof.go            # New (core.Server), Register (gin.Engine mount), Start, Stop
+│   └── options.go          # WithAddr, WithLogger, WithMutexFraction, WithBlockRate, WithConfig
 └── example/                # Runnable reference application
     ├── main.go
     ├── config.yaml

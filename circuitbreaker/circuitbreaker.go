@@ -41,7 +41,6 @@ import (
 	"time"
 
 	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/logger"
 )
 
 // ErrOpen is returned by Execute when the circuit is open and the request was
@@ -116,7 +115,7 @@ func New(name string, opts ...Option) *CircuitBreaker {
 	return &CircuitBreaker{
 		name: name,
 		opts: o,
-		log:  logger.Default(),
+		log:  o.log,
 	}
 }
 

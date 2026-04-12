@@ -15,7 +15,7 @@ import (
 )
 
 func TestGRPCServer_healthCheck(t *testing.T) {
-	srv, err := grpcserver.New(grpcserver.WithAddr(":19090"))
+	srv, err := grpcserver.New(grpcserver.WithAddr(":0"))
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -23,7 +23,7 @@ func TestGRPCServer_healthCheck(t *testing.T) {
 	time.Sleep(80 * time.Millisecond)
 	defer srv.Stop(ctx)
 
-	conn, err := grpc.NewClient("localhost:19090",
+	conn, err := grpc.NewClient(srv.Addr(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
