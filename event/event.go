@@ -120,7 +120,6 @@ func (b *Bus) Publish(ctx context.Context, topic string, payload any) error {
 
 	if b.async {
 		for _, h := range handlers {
-			h := h
 			go func() {
 				if err := h(ctx, payload); err != nil {
 					b.log.Error(ctx, "event handler error",
