@@ -10,11 +10,12 @@ import (
 
 	"github.com/pemako/mk/cache"
 	mkerrors "github.com/pemako/mk/errors"
-	"github.com/pemako/mk/example/internal/model"
-	"github.com/pemako/mk/example/internal/repository"
 	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/metric"
+
+	"github.com/pemako/mk/example/internal/model"
+	"github.com/pemako/mk/example/internal/repository"
 )
 
 var (

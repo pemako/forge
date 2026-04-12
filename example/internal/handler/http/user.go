@@ -9,10 +9,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/pemako/mk/auth"
 	mkerrors "github.com/pemako/mk/errors"
-	"github.com/pemako/mk/example/internal/model"
-	"github.com/pemako/mk/example/internal/service"
 	"github.com/pemako/mk/pagination"
 	"github.com/pemako/mk/validate"
+
+	"github.com/pemako/mk/example/internal/model"
+	"github.com/pemako/mk/example/internal/service"
 )
 
 type UserHandler struct {

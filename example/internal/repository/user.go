@@ -4,8 +4,9 @@ import (
 	"context"
 
 	"github.com/pemako/mk/database"
-	"github.com/pemako/mk/example/internal/model"
 	"gorm.io/gorm"
+
+	"github.com/pemako/mk/example/internal/model"
 )
 
 type UserRepo struct{}
