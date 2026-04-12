@@ -25,8 +25,11 @@ func TestBackoffDelay_increases(t *testing.T) {
 }
 
 func TestBackoffDelay_capped(t *testing.T) {
-	d := httpclient.ExportedBackoffDelay(10, 100*time.Millisecond, 500*time.Millisecond)
-	assert.LessOrEqual(t, d, 600*time.Millisecond)
+	// With result capped at maxDelay, the output must never exceed maxDelay.
+	for range 100 {
+		d := httpclient.ExportedBackoffDelay(10, 100*time.Millisecond, 500*time.Millisecond)
+		assert.LessOrEqual(t, d, 500*time.Millisecond)
+	}
 }
 
 func TestClient_Get_success(t *testing.T) {

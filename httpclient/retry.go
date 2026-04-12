@@ -31,11 +31,14 @@ func backoffDelay(attempt int, base, maxDelay time.Duration) time.Duration {
 	if d > maxDelay {
 		d = maxDelay
 	}
-	// jitter: uniform in [-d/4, +d/4]
+	// jitter: uniform in [-d/4, +d/4], result capped at maxDelay
 	jitter := time.Duration(rand.Int64N(int64(d/2+1))) - d/4
 	result := d + jitter
 	if result < 0 {
 		return 0
+	}
+	if result > maxDelay {
+		return maxDelay
 	}
 	return result
 }

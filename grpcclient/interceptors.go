@@ -40,6 +40,9 @@ func grpcBackoffDelay(attempt int, base, maxDelay time.Duration) time.Duration {
 	if result < 0 {
 		return 0
 	}
+	if result > maxDelay {
+		return maxDelay
+	}
 	return result
 }
 
