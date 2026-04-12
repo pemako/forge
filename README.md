@@ -19,6 +19,10 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 | `errors` | Structured `CodedError` with HTTP code, reason string, and cause chaining |
 | `middleware/http` | RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler, CORS, RateLimit, IPFilter, BodyLimit, Timeout |
 | `middleware/grpc` | UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler, UnaryRateLimit, UnaryIPFilter, UnaryTimeout |
+| `httpclient` | Outbound HTTP client with OTel tracing, exponential-backoff retry, and a named global registry |
+| `grpcclient` | Outbound gRPC client with OTel tracing, per-call retry, and a named global registry |
+| `lock` | Distributed lock backed by Redis with atomic acquire/release, auto-renew, and wait-with-timeout |
+| `cron` | Cron scheduler (`core.Server`) with retries, per-job timeouts, skip-if-running, and sub-second tickers |
 
 ## Installation
 
@@ -541,6 +545,292 @@ if err != nil {
 | `ErrTooMany` | 429 | `TOO_MANY_REQUEST` |
 | `ErrInternal` | 500 | `INTERNAL` |
 
+### `httpclient`
+
+Outbound HTTP client with OTel tracing, exponential-backoff retry, JSON marshal/unmarshal helpers, and a named global registry. All methods are safe for concurrent use.
+
+**Key types / functions**
+
+| Symbol | Description |
+|---|---|
+| `New(opts...) *Client` | Create a client |
+| `Client.Get/Post/Put/Delete` | Typed HTTP verbs; body and response are JSON-marshalled automatically |
+| `Client.Do` | Raw request returning `*Response{StatusCode, Body}` |
+| `Register(name, opts...)` | Create and store a named client in the global registry |
+| `Get(name) *Client` | Retrieve a named client |
+| `Init(cfg, names...)` | Bulk-register clients from config |
+
+**Usage**
+
+```go
+import "github.com/pemako/mk/httpclient"
+
+// One-off client
+c := httpclient.New(
+    httpclient.WithBaseURL("https://api.example.com"),
+    httpclient.WithTimeout(10 * time.Second),
+    httpclient.WithHeader("Authorization", "Bearer "+token),
+    httpclient.WithRetry(3),
+)
+
+var result MyResponse
+if err := c.Get(ctx, "/v1/users/42", &result); err != nil {
+    return err
+}
+
+if err := c.Post(ctx, "/v1/orders", orderReq, &result); err != nil {
+    return err
+}
+
+// Named registry — register once at startup
+httpclient.Register("payments",
+    httpclient.WithBaseURL("https://payments.internal"),
+    httpclient.WithRetry(3),
+    httpclient.WithRetryBaseDelay(200 * time.Millisecond),
+)
+
+// Use anywhere
+c := httpclient.Get("payments")
+c.Put(ctx, "/v1/charge/"+id, req, &resp)
+```
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `WithBaseURL(url)` | `""` | Base URL prepended to every request path |
+| `WithTimeout(d)` | `30s` | Per-request context deadline |
+| `WithRetry(n)` | `0` | Max retry attempts on network error, 429, or 5xx |
+| `WithRetryBaseDelay(d)` | `100ms` | Exponential-backoff base delay |
+| `WithRetryMaxDelay(d)` | `2s` | Backoff cap |
+| `WithHeader(k, v)` | — | Default header sent on every request |
+| `WithLogger(log)` | default logger | Logger for retry debug messages |
+
+**Config**
+
+```yaml
+httpclient:
+  default:
+    base_url: "https://api.example.com"
+    timeout: 30s
+    retry: 3
+  payments:
+    base_url: "https://payments.internal"
+    timeout: 10s
+    retry: 2
+```
+
+---
+
+### `grpcclient`
+
+Outbound gRPC client with OTel tracing (stats handler), per-call logging, exponential-backoff retry on `Unavailable`/`DeadlineExceeded`/`ResourceExhausted`, and a named global registry.
+
+**Key types / functions**
+
+| Symbol | Description |
+|---|---|
+| `Dial(target, opts...) (*grpc.ClientConn, error)` | Open a lazy gRPC connection |
+| `Register(name, target, opts...) error` | Dial and store in the global registry |
+| `Get(name) *grpc.ClientConn` | Retrieve a named connection |
+| `CloseAll()` | Close all registered connections; call in `app.WithAfterStop` |
+| `Init(cfg, names...) error` | Bulk-register from config |
+
+**Usage**
+
+```go
+import "github.com/pemako/mk/grpcclient"
+
+// Register at startup
+if err := grpcclient.Register("user-service", "user-service:9090",
+    grpcclient.WithInsecure(),
+    grpcclient.WithTimeout(5 * time.Second),
+    grpcclient.WithRetry(3),
+); err != nil {
+    panic(err)
+}
+
+// Use anywhere
+conn := grpcclient.Get("user-service")
+client := pb.NewUserServiceClient(conn)
+resp, err := client.GetUser(ctx, &pb.GetUserRequest{Id: id})
+
+// Graceful shutdown — wire into app lifecycle
+app.New(
+    app.WithAfterStop(func(ctx context.Context) error {
+        grpcclient.CloseAll()
+        return nil
+    }),
+)
+```
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `WithInsecure()` | — | Plaintext transport (no TLS) |
+| `WithTLS(caCert)` | — | One-way TLS with CA certificate file |
+| `WithMTLS(cert, key, caCert)` | — | Mutual TLS |
+| `WithTimeout(d)` | `30s` | Per-call context deadline |
+| `WithRetry(n)` | `0` | Max retry attempts for retryable status codes |
+| `WithRetryBaseDelay(d)` | `100ms` | Exponential-backoff base delay |
+| `WithLogger(log)` | default logger | Logger for RPC call events |
+
+**Config**
+
+```yaml
+grpcclient:
+  user-service:
+    addr: "user-service:9090"
+    insecure: true
+    timeout: 5s
+    retry: 3
+  order-service:
+    addr: "order-service:9090"
+    insecure: true
+    timeout: 10s
+```
+
+---
+
+### `lock`
+
+Distributed lock backed by Redis. Uses atomic Lua scripts for both acquire (SET NX PX) and release (compare-and-delete), preventing accidental release of a lock owned by another instance. All methods are safe for concurrent use.
+
+**Key types / functions**
+
+| Symbol | Description |
+|---|---|
+| `New(addr, opts...) *Locker` | Create a Locker with its own Redis connection |
+| `NewWithClient(rdb, opts...) *Locker` | Create a Locker using an existing `*redis.Client` |
+| `Locker.Acquire(ctx, key, ttl)` | Low-level: attempt once, returns `(bool, error)` |
+| `Locker.Release(ctx, key)` | Low-level: release if this Locker holds the token |
+| `Locker.TryLock(ctx, key, ttl, fn, opts...)` | Acquire, run fn, release; handles wait and auto-renew |
+| `ErrLockNotAcquired` | Returned when lock is already held and `WithWait` is not set |
+| `ErrLockExpired` | Returned when auto-renew detects the lock was lost mid-execution |
+
+**Usage**
+
+```go
+import "github.com/pemako/mk/lock"
+
+// Share an existing Redis client (e.g. from the cache package)
+locker := lock.NewWithClient(rdb, lock.WithLogger(log))
+
+// Simple try-once pattern
+err := locker.TryLock(ctx, "invoice:process:42", 30*time.Second, func(ctx context.Context) error {
+    return processInvoice(ctx, 42)
+})
+if errors.Is(err, lock.ErrLockNotAcquired) {
+    // Another instance is processing — skip silently
+    return nil
+}
+
+// Wait up to 5s for the lock, then auto-renew the TTL while processing
+err = locker.TryLock(ctx, "report:generate", 10*time.Second,
+    func(ctx context.Context) error {
+        return generateReport(ctx) // may take longer than 10s
+    },
+    lock.WithWait(5*time.Second, 200*time.Millisecond),
+    lock.WithAutoRenew(),
+)
+if errors.Is(err, lock.ErrLockExpired) {
+    log.Error(ctx, "lock lost during report generation")
+}
+```
+
+**Options**
+
+| Option | Description |
+|---|---|
+| `WithRedisPassword(pw)` | Redis AUTH password (for `New` only) |
+| `WithRedisDB(db)` | Redis logical DB index (for `New` only, default `0`) |
+| `WithLogger(log)` | Logger for acquire/release/renewal events |
+
+**TryLock options**
+
+| Option | Description |
+|---|---|
+| `WithWait(timeout, interval)` | Poll until the lock is free or timeout elapses |
+| `WithAutoRenew()` | Renew the lock TTL every `ttl/3` in the background |
+
+---
+
+### `cron`
+
+Cron scheduler that implements `core.Server` and integrates with the `app` lifecycle via `app.WithServer`. Supports standard 5-field cron syntax, robfig shorthands (`@hourly`, `@every 5m`, etc.), and sub-second intervals via a ticker. Each job gets panic recovery, optional timeout, optional retry with exponential backoff, and optional skip-if-running protection.
+
+**Key types / functions**
+
+| Symbol | Description |
+|---|---|
+| `New(opts...) *Scheduler` | Create a scheduler |
+| `Scheduler.Add(name, spec, fn, opts...)` | Register a named job |
+| `Scheduler.Remove(name)` | Unregister a job (in-flight execution finishes) |
+| `Scheduler.Start(ctx) error` | Implements `core.Server`; blocks until `Stop` |
+| `Scheduler.Stop(ctx) error` | Graceful shutdown; waits for running jobs up to ctx deadline |
+
+**Usage**
+
+```go
+import "github.com/pemako/mk/cron"
+
+scheduler := cron.New(cron.WithLogger(log))
+
+// Simple job — runs every 5 minutes
+scheduler.Add("cleanup", "@every 5m", func(ctx context.Context) error {
+    return cleanupExpiredSessions(ctx)
+})
+
+// Job with timeout, retries, and overlap protection
+scheduler.Add("report", "0 3 * * *",  // daily at 03:00 UTC
+    func(ctx context.Context) error {
+        return generateDailyReport(ctx)
+    },
+    cron.WithTimeout(10*time.Minute),
+    cron.WithRetries(2),
+    cron.WithRetryDelay(30*time.Second),
+    cron.WithSkipIfRunning(),
+)
+
+// Sub-second ticker (uses time.Ticker, not robfig)
+scheduler.Add("heartbeat", "@every 500ms", func(ctx context.Context) error {
+    return emitHeartbeat(ctx)
+})
+
+// Wire into app lifecycle — Start/Stop managed automatically
+app.New(
+    app.WithServer(httpSrv, grpcSrv, scheduler),
+)
+```
+
+**Scheduler options**
+
+| Option | Default | Description |
+|---|---|---|
+| `WithLogger(log)` | default logger | Logger for job lifecycle events |
+| `WithLocation(loc)` | `time.UTC` | Timezone for cron expression evaluation |
+
+**Per-job options**
+
+| Option | Default | Description |
+|---|---|---|
+| `WithTimeout(d)` | none | Cancel the job context after d |
+| `WithRetries(n)` | `0` | Max retry attempts on error |
+| `WithRetryDelay(d)` | `1s` | Base delay for exponential backoff between retries |
+| `WithSkipIfRunning()` | false | Skip the tick if a previous execution is still running |
+
+**Log output**
+
+```json
+{"level":"info","msg":"cron start","job":"report"}
+{"level":"info","msg":"cron done","job":"report","elapsed":"2.341s"}
+{"level":"error","msg":"cron failed","job":"report","err":"context deadline exceeded","retry":0}
+{"level":"warn","msg":"cron skip","job":"report","reason":"still running"}
+```
+
+---
+
 ## Middleware Reference
 
 ### HTTP Middleware (`middleware/http`)
@@ -819,6 +1109,22 @@ github.com/pemako/mk/
 ├── tracing/                # OTel OTLP trace provider
 │   ├── provider.go         # New, Provider.Tracer, Provider.Shutdown
 │   └── options.go          # WithEndpoint, WithSampler, WithConfig
+├── httpclient/             # Outbound HTTP client with OTel tracing and retry
+│   ├── client.go           # New, Get/Post/Put/Delete, Do, Register, Get, Init
+│   ├── options.go          # WithBaseURL, WithTimeout, WithRetry, WithHeader, WithLogger
+│   └── retry.go            # shouldRetry, backoffDelay
+├── grpcclient/             # Outbound gRPC client with OTel tracing and retry
+│   ├── client.go           # Dial, Register, Get, CloseAll, Init
+│   ├── options.go          # WithInsecure, WithTLS, WithMTLS, WithTimeout, WithRetry
+│   └── interceptors.go     # unaryLoggerInterceptor, unaryRetryInterceptor
+├── lock/                   # Distributed lock backed by Redis
+│   ├── lock.go             # Locker, New, NewWithClient, Acquire, Release, TryLock
+│   ├── options.go          # WithRedisPassword, WithRedisDB, WithLogger, WithWait, WithAutoRenew
+│   └── errors.go           # ErrLockNotAcquired, ErrLockExpired
+├── cron/                   # Cron scheduler (core.Server)
+│   ├── cron.go             # Scheduler, New, Add, Remove, Start, Stop
+│   ├── options.go          # WithLogger, WithLocation, WithTimeout, WithRetries, WithSkipIfRunning
+│   └── job.go              # executeJob, runOnce, cronBackoff
 └── example/                # Runnable reference application
     ├── main.go
     ├── config.yaml
