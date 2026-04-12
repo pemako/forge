@@ -7,8 +7,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pemako/mk/pagination"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pemako/mk/pagination"
 )
 
 func TestFromParams_defaults(t *testing.T) {

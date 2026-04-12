@@ -10,10 +10,11 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	mkerrors "github.com/pemako/mk/errors"
-	"github.com/pemako/mk/validate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	mkerrors "github.com/pemako/mk/errors"
+	"github.com/pemako/mk/validate"
 )
 
 type createReq struct {

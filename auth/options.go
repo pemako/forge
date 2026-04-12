@@ -1,3 +1,18 @@
+// Package auth provides JWT-based authentication middleware and token utilities
+// for gin HTTP servers. It is intentionally minimal: the framework handles
+// signing, verification, and context storage; business logic defines its own
+// Claims struct and secret management.
+//
+// Typical usage:
+//
+//	// main.go — register middleware
+//	r.Use(auth.Required(
+//	    auth.WithSecret(cfg.GetString("auth.secret")),
+//	    auth.WithClaims(func() auth.Claims { return &UserClaims{} }),
+//	))
+//
+//	// handler — extract claims
+//	claims, ok := auth.FromContext[*UserClaims](c.Request.Context())
 package auth
 
 import (

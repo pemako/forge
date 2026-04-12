@@ -1,6 +1,28 @@
 // Package validate provides request binding and struct validation helpers
-// for gin handlers, backed by go-playground/validator/v10.
-// All functions return a 400 CodedError with field-level details on failure.
+// for gin handlers, backed by go-playground/validator/v10. Each Bind* function
+// combines gin's ShouldBind* for deserialization with Struct for tag-driven
+// validation, returning a single 400 CodedError with field-level detail on
+// failure. Struct can also be used standalone in the service layer.
+//
+// All functions share a singleton *validator.Validate instance that is
+// initialised on first use. Call Register before the first Bind* or Struct
+// call to add custom validation tags.
+//
+// Typical usage:
+//
+//	type CreateUserReq struct {
+//	    Name  string `json:"name"  validate:"required,min=2,max=64"`
+//	    Email string `json:"email" validate:"required,email"`
+//	}
+//
+//	func CreateUser(c *gin.Context) {
+//	    var req CreateUserReq
+//	    if err := validate.BindJSON(c, &req); err != nil {
+//	        c.Error(err)
+//	        return
+//	    }
+//	    // req is safe to use
+//	}
 package validate
 
 import (
@@ -25,15 +47,23 @@ func getInstance() *validator.Validate {
 	return instance
 }
 
-// Register adds a custom validation function for the given tag.
-// Must be called before the first use of any Bind* or Struct function.
+// Register adds a custom validation function for the given tag to the shared
+// validator instance. It must be called before the first invocation of any
+// Bind* or Struct function; later calls have no effect on the already-
+// initialised singleton.
+//
+//	validate.Register("slug", func(fl validator.FieldLevel) bool {
+//	    return slugRe.MatchString(fl.Field().String())
+//	})
 func Register(tag string, fn validator.Func) error {
 	return getInstance().RegisterValidation(tag, fn)
 }
 
-// Struct validates a struct using its `validate` tags.
-// Returns a 400 CodedError with field-level details on failure.
-// Can be used outside gin handlers (e.g., in the service layer).
+// Struct validates a struct using its `validate` struct tags. It returns a 400
+// CodedError whose Metadata map contains field → failed-tag pairs on failure,
+// or nil on success. Unlike the Bind* functions, Struct does not perform any
+// binding; it can be called outside gin handlers (e.g., in the service layer)
+// to re-validate or validate values constructed in code.
 func Struct(obj any) error {
 	if err := getInstance().Struct(obj); err != nil {
 		return toCodedError(err)
@@ -43,7 +73,8 @@ func Struct(obj any) error {
 
 // Bind binds the request body based on Content-Type and validates the result.
 // Supports JSON (application/json) and form data (application/x-www-form-urlencoded,
-// multipart/form-data). Use BindJSON or BindForm to bind explicitly.
+// multipart/form-data). Use BindJSON or BindForm to bind to a specific format
+// regardless of Content-Type.
 func Bind(c *gin.Context, obj any) error {
 	if err := c.ShouldBind(obj); err != nil {
 		return mkerrors.Define(400, "BAD_REQUEST", err.Error())
