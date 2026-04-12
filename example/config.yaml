@@ -18,8 +18,12 @@ database:
     slow_threshold: 100ms
 
 logger:
-  level: info
-  output: file
+  level: debug
+  output: both           # stdout + file
+  filename: logs/app     # 实际文件: logs/app.debug.log / .info.log / .warn.log / .error.log
+  max_size: 100          # 单文件最大 MB
+  max_age: 7             # 保留天数
+  max_backups: 10
 
 tracing:
   endpoint: ""
