@@ -19,9 +19,13 @@ func NewUserHandler(svc *service.UserService) *UserHandler {
 func (h *UserHandler) RegisterRoutes(r *gin.Engine) {
 	g := r.Group("/api/v1/users")
 	g.POST("", h.Create)
+	g.POST("/locked", h.CreateWithLock)
 	g.GET("", h.List)
 	g.GET("/:id", h.Get)
 	g.GET("/:id/cached", h.GetCached)
+
+	posts := r.Group("/api/v1/posts")
+	posts.GET("/:id", h.GetExternalPost)
 }
 
 func (h *UserHandler) Create(c *gin.Context) {
@@ -76,4 +80,39 @@ func (h *UserHandler) GetCached(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, u)
+}
+
+// GetExternalPost proxies GET /api/v1/posts/:id to the JSONPlaceholder API,
+// demonstrating the httpclient named-registry pattern.
+func (h *UserHandler) GetExternalPost(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	post, err := h.svc.GetExternalPost(c.Request.Context(), id)
+	if err != nil {
+		c.Error(err) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, post)
+}
+
+// CreateWithLock creates a user protected by a distributed Redis lock,
+// demonstrating the lock.TryLock API.
+func (h *UserHandler) CreateWithLock(c *gin.Context) {
+	var req struct {
+		Name  string `json:"name" binding:"required"`
+		Email string `json:"email" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	u, err := h.svc.CreateWithLock(c.Request.Context(), req.Name, req.Email)
+	if err != nil {
+		c.Error(err) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusCreated, u)
 }

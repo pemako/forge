@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/pemako/mk/app"
 	"github.com/pemako/mk/cache"
 	"github.com/pemako/mk/config"
+	"github.com/pemako/mk/cron"
 	"github.com/pemako/mk/database"
 	httphandler "github.com/pemako/mk/example/internal/handler/http"
 	"github.com/pemako/mk/example/internal/service"
+	"github.com/pemako/mk/grpcclient"
+	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/logger"
 	"github.com/pemako/mk/metric"
 	grpcserver "github.com/pemako/mk/server/grpc"
@@ -55,6 +59,13 @@ func main() {
 	// Cache (optional — skip if not configured)
 	_ = cache.Init(cache.WithConfig(cfg))
 
+	// HTTP client — register named client for external API calls
+	httpclient.Register("jsonplaceholder",
+		httpclient.WithBaseURL("https://jsonplaceholder.typicode.com"),
+		httpclient.WithTimeout(10*time.Second),
+		httpclient.WithRetry(2),
+	)
+
 	// HTTP server
 	httpSrv, err := httpserver.New(
 		httpserver.WithConfig(cfg),
@@ -78,11 +89,25 @@ func main() {
 	userHandler := httphandler.NewUserHandler(userSvc)
 	userHandler.RegisterRoutes(httpSrv.Engine())
 
+	// Cron scheduler — register background jobs
+	scheduler := cron.New(cron.WithLogger(log))
+	if err := scheduler.Add("cleanup-expired-sessions", "@every 1m",
+		func(ctx context.Context) error {
+			log.Info(ctx, "running scheduled cleanup")
+			// In production: delete expired sessions, purge old records, etc.
+			return nil
+		},
+		cron.WithTimeout(30*time.Second),
+		cron.WithSkipIfRunning(),
+	); err != nil {
+		panic("cron: " + err.Error())
+	}
+
 	// Run
 	if err := app.New(
 		app.WithName(cfg.GetString("app.name")),
 		app.WithVersion(cfg.GetString("app.version")),
-		app.WithServer(httpSrv, grpcSrv),
+		app.WithServer(httpSrv, grpcSrv, scheduler),
 		app.WithLogger(log),
 		app.WithMigration(dbMgr),
 		app.WithBeforeStart(func(ctx context.Context) error {
@@ -95,6 +120,7 @@ func main() {
 			return nil
 		}),
 		app.WithAfterStop(func(ctx context.Context) error {
+			grpcclient.CloseAll()
 			metric.Shutdown()
 			return provider.Shutdown(ctx)
 		}),

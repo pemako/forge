@@ -34,3 +34,15 @@ metric:
 cache:
   default:
     backend: memory
+
+httpclient:
+  jsonplaceholder:
+    base_url: "https://jsonplaceholder.typicode.com"
+    timeout: 10s
+    retry: 2
+
+cron:
+  # cron jobs are configured in code, not config file
+
+lock:
+  # lock uses Redis; omit if no Redis configured

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,8 @@ import (
 	mkerrors "github.com/pemako/mk/errors"
 	"github.com/pemako/mk/example/internal/model"
 	"github.com/pemako/mk/example/internal/repository"
+	"github.com/pemako/mk/httpclient"
+	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/metric"
 )
 
@@ -84,4 +87,44 @@ func (s *UserService) GetCached(ctx context.Context, id uint) (*model.User, erro
 		}
 	}
 	return u, nil
+}
+
+// GetExternalPost fetches a post from the JSONPlaceholder API, demonstrating
+// the httpclient named-registry pattern.
+func (s *UserService) GetExternalPost(ctx context.Context, id int) (map[string]any, error) {
+	c := httpclient.Get("jsonplaceholder")
+	if c == nil {
+		return nil, mkerrors.ErrInternal
+	}
+	var post map[string]any
+	err := c.Get(ctx, fmt.Sprintf("/posts/%d", id), &post)
+	if err != nil {
+		return nil, mkerrors.Wrap(mkerrors.ErrInternal, "fetch external post: %w", err)
+	}
+	return post, nil
+}
+
+// CreateWithLock creates a user guarded by a distributed Redis lock, so that
+// two concurrent requests for the same email cannot both pass the uniqueness
+// check at the same time. This demonstrates the lock.TryLock API.
+func (s *UserService) CreateWithLock(ctx context.Context, name, email string) (*model.User, error) {
+	locker := lock.New("localhost:6379") // in production: use configured Redis address
+	lockKey := "user:email:" + email
+
+	var result *model.User
+	err := locker.TryLock(ctx, lockKey, 10*time.Second,
+		func(lockCtx context.Context) error {
+			u, err := s.Create(lockCtx, name, email)
+			if err != nil {
+				return err
+			}
+			result = u
+			return nil
+		},
+		lock.WithWait(3*time.Second, 100*time.Millisecond),
+	)
+	if errors.Is(err, lock.ErrLockNotAcquired) {
+		return nil, mkerrors.Define(409, "DUPLICATE_REQUEST", "concurrent request in progress")
+	}
+	return result, err
 }
