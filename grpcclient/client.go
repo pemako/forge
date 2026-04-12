@@ -1,4 +1,4 @@
-// grpcclient/client.go
+// Package grpcclient/client.go
 // Dial, named registry, and Init for the grpcclient package.
 package grpcclient
 

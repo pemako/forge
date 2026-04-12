@@ -1,4 +1,4 @@
-// httpclient/retry.go
+// Package httpclient/retry.go
 // Retry helpers for httpclient. These are intentionally unexported; external
 // consumers configure retry behaviour through WithRetry, WithRetryBaseDelay,
 // and WithRetryMaxDelay options.

@@ -1,4 +1,4 @@
-// cron/job.go
+// Package cron/job.go
 // Job execution helpers: panic recovery, timeout wrapping, and retry backoff.
 package cron
 

@@ -1,4 +1,4 @@
-// httpclient/client.go
+// Package httpclient/client.go
 // Core Client implementation, named registry, and Init helper.
 package httpclient
 
@@ -12,8 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pemako/mk/core"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/pemako/mk/core"
 )
 
 // Response holds the raw HTTP response returned by Do.

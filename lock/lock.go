@@ -1,4 +1,4 @@
-// lock/lock.go
+// Package lock/lock.go
 // Locker implementation: Acquire, Release, and TryLock.
 package lock
 
@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pemako/mk/core"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/pemako/mk/core"
 )
 
 const (

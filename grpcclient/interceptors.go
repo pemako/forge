@@ -1,4 +1,4 @@
-// grpcclient/interceptors.go
+// Package grpcclient/interceptors.go
 // Unary client interceptors used by Dial: logging and retry.
 // These are package-internal; callers configure behaviour through Options.
 package grpcclient
@@ -8,10 +8,11 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/pemako/mk/core"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/pemako/mk/core"
 )
 
 // shouldRetryCode reports whether the gRPC status code warrants a retry.

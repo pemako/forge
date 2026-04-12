@@ -1,4 +1,4 @@
-// cron/cron.go
+// Package cron/cron.go
 // Scheduler type, Add/Remove, and core.Server implementation.
 package cron
 

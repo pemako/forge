@@ -1,4 +1,4 @@
-// lock/options.go
+// Package lock/options.go
 // Constructor options (Option) and per-operation options (TryLockOption).
 package lock
 

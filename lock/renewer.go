@@ -1,4 +1,4 @@
-// lock/renewer.go
+// Package lock/renewer.go
 // Background TTL renewal for held locks.
 package lock
 
@@ -6,8 +6,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/pemako/mk/core"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/pemako/mk/core"
 )
 
 // renewLua atomically extends the TTL only if the token still matches.
