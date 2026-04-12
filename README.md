@@ -23,6 +23,9 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 | `grpcclient` | Outbound gRPC client with OTel tracing, per-call retry, and a named global registry |
 | `lock` | Distributed lock backed by Redis with atomic acquire/release, auto-renew, and wait-with-timeout |
 | `cron` | Cron scheduler (`core.Server`) with retries, per-job timeouts, skip-if-running, and sub-second tickers |
+| `auth` | JWT signing/verification and gin middleware (`Required`, `Optional`) with typed claims extraction via generics |
+| `validate` | Request binding + struct validation backed by go-playground/validator; returns structured 400 errors with field-level metadata |
+| `pagination` | Standard page-number pagination params and a typed `Result[T]` response envelope for list endpoints |
 
 ## Installation
 
@@ -831,6 +834,195 @@ app.New(
 
 ---
 
+### `auth`
+
+JWT signing and verification with gin middleware. The framework handles HS256 signing, token parsing, and context storage. Business code defines its own `Claims` struct and manages its own secret.
+
+**Key API**
+
+| Symbol | Description |
+|---|---|
+| `Generate(claims, opts...) (string, error)` | Sign and return a JWT string using HS256 |
+| `Required(opts...) gin.HandlerFunc` | Middleware that requires a valid Bearer token; aborts with 401 otherwise |
+| `Optional(opts...) gin.HandlerFunc` | Middleware that parses the token if present; requests without a token continue normally |
+| `FromContext[T](ctx) (T, bool)` | Extract typed claims stored by `Required` or `Optional` |
+
+**Options**
+
+| Option | Description |
+|---|---|
+| `WithSecret(secret)` | HMAC signing secret for HS256 |
+| `WithKeyFunc(fn)` | Custom `jwt.Keyfunc` for key rotation |
+| `WithExpire(d)` | Token expiration duration (default 24h) |
+| `WithIssuer(iss)` | `iss` claim added to generated tokens |
+| `WithClaims(fn)` | Factory that returns a new empty claims instance for parsing |
+
+**Usage**
+
+```go
+// 1. Define your claims struct — embed jwt.RegisteredClaims to satisfy auth.Claims.
+type UserClaims struct {
+    jwt.RegisteredClaims
+    UserID int64  `json:"uid"`
+    Role   string `json:"role"`
+}
+
+// 2. Generate a token (e.g. in a login handler)
+token, err := auth.Generate(&UserClaims{
+    RegisteredClaims: jwt.RegisteredClaims{
+        ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+    },
+    UserID: 42,
+    Role:   "admin",
+}, auth.WithSecret(cfg.GetString("auth.secret")))
+
+// 3. Protect a route group with middleware
+protected := r.Group("/api/v1")
+protected.Use(auth.Required(
+    auth.WithSecret(cfg.GetString("auth.secret")),
+    auth.WithClaims(func() auth.Claims { return &UserClaims{} }),
+))
+
+// 4. Extract claims inside a handler
+func GetMe(c *gin.Context) {
+    claims, ok := auth.FromContext[*UserClaims](c.Request.Context())
+    if !ok {
+        c.Error(errors.ErrUnAuth)
+        return
+    }
+    c.JSON(200, gin.H{"user_id": claims.UserID, "role": claims.Role})
+}
+```
+
+> Business code defines the `Claims` struct by embedding `jwt.RegisteredClaims`. The `auth` package never imports the struct — it receives a factory function via `WithClaims`.
+
+---
+
+### `validate`
+
+Request binding and struct validation for gin handlers, backed by [go-playground/validator v10](https://github.com/go-playground/validator). All functions return a structured 400 `CodedError` with field-level details on failure — no raw `err.Error()` strings leak to callers.
+
+**Key API**
+
+| Function | Description |
+|---|---|
+| `Bind(c, obj)` | Bind by Content-Type (JSON or form) and validate |
+| `BindJSON(c, obj)` | Bind JSON body and validate |
+| `BindForm(c, obj)` | Bind form data and validate |
+| `BindQuery(c, obj)` | Bind query string parameters and validate |
+| `BindURI(c, obj)` | Bind URI path parameters and validate |
+| `Struct(obj)` | Validate a struct directly (no gin context needed) |
+| `Register(tag, fn)` | Register a custom validation tag |
+
+**Error response format**
+
+On validation failure, `BindJSON` (and all `Bind*` variants) return a `CodedError` that the `ErrorHandler` middleware serialises as:
+
+```json
+{
+  "code": 400,
+  "reason": "VALIDATION_FAILED",
+  "message": "validation failed",
+  "metadata": {
+    "email": "required",
+    "name": "min"
+  }
+}
+```
+
+**Usage**
+
+```go
+// Struct tags: `json`/`form`/`uri` for binding, `validate` for rules.
+type CreateUserReq struct {
+    Name  string `json:"name"  validate:"required,min=2"`
+    Email string `json:"email" validate:"required,email"`
+}
+
+// In a handler — replaces c.ShouldBindJSON + manual validation.
+func (h *UserHandler) Create(c *gin.Context) {
+    var req CreateUserReq
+    if err := validate.BindJSON(c, &req); err != nil {
+        c.Error(err)
+        return
+    }
+    // req is valid here
+}
+
+// Query params for a list endpoint.
+type ListReq struct {
+    Status string `form:"status" validate:"omitempty,oneof=active inactive"`
+}
+func (h *UserHandler) List(c *gin.Context) {
+    var q ListReq
+    if err := validate.BindQuery(c, &q); err != nil {
+        c.Error(err)
+        return
+    }
+}
+
+// URI path params.
+type GetReq struct {
+    ID int64 `uri:"id" validate:"required,min=1"`
+}
+func (h *UserHandler) Get(c *gin.Context) {
+    var p GetReq
+    if err := validate.BindURI(c, &p); err != nil {
+        c.Error(err)
+        return
+    }
+}
+```
+
+---
+
+### `pagination`
+
+Standard page-number pagination helpers for list endpoints. Parses and normalises `page` and `page_size` query parameters, enforces defaults (page=1, page_size=20) and a hard cap (page_size≤100), and wraps results in a typed `Result[T]` envelope.
+
+**Key API**
+
+| Symbol | Description |
+|---|---|
+| `FromQuery(c) Params` | Parse pagination params from the gin query string |
+| `FromParams(page, pageSize) Params` | Construct `Params` from explicit values (service layer) |
+| `Offset(p) int` | Return the DB query offset: `(page - 1) * page_size` |
+| `New[T](total, data, p) Result[T]` | Wrap a page of results in the standard envelope |
+
+**Response envelope**
+
+```json
+{
+  "total": 142,
+  "page": 2,
+  "page_size": 20,
+  "data": [ ... ]
+}
+```
+
+**Usage**
+
+```go
+func (h *UserHandler) List(c *gin.Context) {
+    p := pagination.FromQuery(c)   // parses ?page=2&page_size=20, applies defaults
+
+    users, err := svc.List(ctx, pagination.Offset(p), p.PageSize)
+    if err != nil {
+        c.Error(err)
+        return
+    }
+    total, err := svc.Count(ctx)
+    if err != nil {
+        c.Error(err)
+        return
+    }
+
+    c.JSON(200, pagination.New(total, users, p))
+}
+```
+
+---
+
 ## Middleware Reference
 
 ### HTTP Middleware (`middleware/http`)
@@ -1125,10 +1317,19 @@ github.com/pemako/mk/
 │   ├── cron.go             # Scheduler, New, Add, Remove, Start, Stop
 │   ├── options.go          # WithLogger, WithLocation, WithTimeout, WithRetries, WithSkipIfRunning
 │   └── job.go              # executeJob, runOnce, cronBackoff
+├── auth/                   # JWT signing/verification + gin middleware
+│   ├── auth.go             # Generate, Required, Optional, FromContext
+│   └── options.go          # WithSecret, WithKeyFunc, WithExpire, WithIssuer, WithClaims
+├── validate/               # Request binding + struct validation
+│   └── validate.go         # Bind, BindJSON, BindForm, BindQuery, BindURI, Struct, Register
+├── pagination/             # Page-number pagination helpers
+│   └── pagination.go       # Params, Result[T], FromQuery, FromParams, Offset, New
 └── example/                # Runnable reference application
     ├── main.go
     ├── config.yaml
     └── internal/
         ├── handler/http/   # HTTP route handlers
+        ├── model/          # Data models and JWT claims
+        ├── repository/     # Database access layer
         └── service/        # Business logic
 ```

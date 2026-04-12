@@ -46,3 +46,7 @@ cron:
 
 lock:
   # lock uses Redis; omit if no Redis configured
+
+auth:
+  secret: "example-jwt-secret-change-in-production"
+  expire: 24h

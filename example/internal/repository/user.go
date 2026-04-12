@@ -23,8 +23,16 @@ func (r *UserRepo) FindByID(ctx context.Context, id uint) (*model.User, error) {
 	return &u, err
 }
 
-func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
+// List returns a page of users by offset and limit.
+func (r *UserRepo) List(ctx context.Context, offset, limit int) ([]model.User, error) {
 	var users []model.User
-	err := database.DB("default").WithContext(ctx).Find(&users).Error
+	err := database.DB("default").WithContext(ctx).Offset(offset).Limit(limit).Find(&users).Error
 	return users, err
+}
+
+// Count returns the total number of users.
+func (r *UserRepo) Count(ctx context.Context) (int64, error) {
+	var count int64
+	err := database.DB("default").WithContext(ctx).Model(&model.User{}).Count(&count).Error
+	return count, err
 }

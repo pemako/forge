@@ -56,8 +56,12 @@ func (s *UserService) Get(ctx context.Context, id uint) (*model.User, error) {
 	return u, nil
 }
 
-func (s *UserService) List(ctx context.Context) ([]model.User, error) {
-	return s.repo.List(ctx)
+func (s *UserService) List(ctx context.Context, offset, limit int) ([]model.User, error) {
+	return s.repo.List(ctx, offset, limit)
+}
+
+func (s *UserService) Count(ctx context.Context) (int64, error) {
+	return s.repo.Count(ctx)
 }
 
 func (s *UserService) GetCached(ctx context.Context, id uint) (*model.User, error) {

@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/pemako/mk/app"
+	"github.com/pemako/mk/auth"
 	"github.com/pemako/mk/cache"
 	"github.com/pemako/mk/config"
 	"github.com/pemako/mk/cron"
 	"github.com/pemako/mk/database"
-	httphandler "github.com/pemako/mk/example/internal/handler/http"
-	"github.com/pemako/mk/example/internal/service"
 	"github.com/pemako/mk/grpcclient"
 	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/logger"
@@ -19,6 +18,10 @@ import (
 	grpcserver "github.com/pemako/mk/server/grpc"
 	httpserver "github.com/pemako/mk/server/http"
 	"github.com/pemako/mk/tracing"
+
+	httphandler "github.com/pemako/mk/example/internal/handler/http"
+	"github.com/pemako/mk/example/internal/model"
+	"github.com/pemako/mk/example/internal/service"
 )
 
 func main() {
@@ -87,7 +90,18 @@ func main() {
 	// Register HTTP routes
 	userSvc := service.NewUserService()
 	userHandler := httphandler.NewUserHandler(userSvc)
-	userHandler.RegisterRoutes(httpSrv.Engine())
+	r := httpSrv.Engine()
+
+	// Public routes
+	userHandler.RegisterRoutes(r)
+
+	// Protected routes — require a valid JWT
+	protected := r.Group("/api/v1/protected")
+	protected.Use(auth.Required(
+		auth.WithSecret(cfg.GetString("auth.secret")),
+		auth.WithClaims(func() auth.Claims { return &model.UserClaims{} }),
+	))
+	protected.GET("/me", userHandler.GetMe)
 
 	// Cron scheduler — register background jobs
 	scheduler := cron.New(cron.WithLogger(log))
