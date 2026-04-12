@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 
+	"github.com/pemako/mk/cache"
 	mkerrors "github.com/pemako/mk/errors"
 	"github.com/pemako/mk/example/internal/model"
 	"github.com/pemako/mk/example/internal/repository"
@@ -51,4 +55,33 @@ func (s *UserService) Get(ctx context.Context, id uint) (*model.User, error) {
 
 func (s *UserService) List(ctx context.Context) ([]model.User, error) {
 	return s.repo.List(ctx)
+}
+
+func (s *UserService) GetCached(ctx context.Context, id uint) (*model.User, error) {
+	key := fmt.Sprintf("user:%d", id)
+
+	// Try cache first
+	c := cache.Client("default")
+	if c != nil {
+		if val, err := c.Get(ctx, key); err == nil {
+			var u model.User
+			if jsonErr := json.Unmarshal([]byte(val), &u); jsonErr == nil {
+				return &u, nil
+			}
+		}
+	}
+
+	// Cache miss — query DB
+	u, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache
+	if c != nil {
+		if data, jsonErr := json.Marshal(u); jsonErr == nil {
+			_ = c.Set(ctx, key, string(data), 5*time.Minute)
+		}
+	}
+	return u, nil
 }

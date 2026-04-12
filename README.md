@@ -15,7 +15,7 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 | `server/http` | Gin HTTP server with a default middleware stack pre-mounted |
 | `server/grpc` | gRPC server with interceptor chain, health check, and optional TLS |
 | `database` | GORM connection manager for MySQL, Postgres, and SQLite with goose migrations |
-| `cache` | go-redis client manager with slow-command logging |
+| `cache` | Cache client manager with in-memory (default) and Redis backends; unified `Cache` interface |
 | `errors` | Structured `CodedError` with HTTP code, reason string, and cause chaining |
 | `middleware/http` | RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler, CORS, RateLimit, IPFilter, BodyLimit, Timeout |
 | `middleware/grpc` | UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler, UnaryRateLimit, UnaryIPFilter, UnaryTimeout |
@@ -147,16 +147,15 @@ database:
     driver: mysql
     dsn: "user:pass@tcp(primary:3306)/mydb?parseTime=true"
 
-# Redis cache — default and session instances are scanned automatically
+# Cache — in-memory by default; Redis is optional
 cache:
   default:
-    addr: localhost:6379    # host:port
-    password: ""            # optional auth password
-    db: 0                   # Redis DB index
+    backend: memory        # in-memory, no Redis required
   session:
-    addr: localhost:6380
-    password: ""
-    db: 1
+    backend: redis
+    addr: "redis:6379"     # host:port
+    password: ""           # optional auth password
+    db: 0                  # Redis DB index
 ```
 
 Environment variables override any YAML key. When `WithEnv("APP")` is passed to `config.Load`, the variable `APP_SERVER_HTTP_ADDR` overrides `server.http.addr` (prefix stripped, underscores converted to dots).
@@ -454,19 +453,52 @@ When `trace_all_sql: true` is set, every SQL statement is emitted as an OTel spa
 
 ### `cache`
 
-go-redis client manager. All clients are stored in a package-level registry and retrieved by name. A slow-command hook logs a warning for any command taking longer than 100 ms.
+Cache client manager with a unified `Cache` interface. All backends are stored in a package-level registry and retrieved by name. The default backend is in-memory (no external dependencies). Redis is optional and configured via `WithRedis`/`WithRedisAuth` or a `backend: redis` config entry. A slow-command hook logs a warning for Redis commands taking longer than 100 ms.
 
 ```go
-err := cache.Init(
-    cache.WithConfig(cfg),             // reads cache.default and cache.session
-    cache.WithLogger(log),
-    // or add instances explicitly:
-    cache.WithAddr("default", "localhost:6379"),
-    cache.WithAddrAuth("session", "localhost:6380", "secret", 1),
-)
+// In-memory (default, no Redis needed)
+cache.Init(cache.WithMemory("default"))
 
-rdb := cache.Client("default")  // *redis.Client
-rdb.Set(ctx, "key", "value", time.Hour)
+// Redis (optional)
+cache.Init(cache.WithRedis("session", "redis:6379"))
+
+// Use the Cache interface — same API regardless of backend
+c := cache.Client("default")
+
+ctx := context.Background()
+c.Set(ctx, "user:1", userData, time.Hour)
+
+val, err := c.Get(ctx, "user:1")
+if errors.Is(err, cache.ErrCacheMiss) {
+    // key not found or expired
+}
+
+c.Del(ctx, "user:1")
+
+exists, err := c.Exists(ctx, "user:1")
+```
+
+**Options**
+
+| Option | Description |
+|---|---|
+| `WithMemory(name)` | Register a named in-memory backend (no external deps) |
+| `WithRedis(name, addr)` | Register a named Redis backend by `host:port` |
+| `WithRedisAuth(name, addr, password, db)` | Register a named Redis backend with auth and DB index |
+| `WithConfig(cfg)` | Read all backends from config (see YAML below) |
+| `WithLogger(log)` | Logger for slow Redis command warnings |
+
+**Config**
+
+```yaml
+cache:
+  default:
+    backend: memory        # in-memory, no Redis required
+  session:
+    backend: redis
+    addr: "redis:6379"
+    password: ""
+    db: 0
 ```
 
 ---
@@ -726,9 +758,11 @@ github.com/pemako/mk/
 ├── app/                    # Application lifecycle runner
 │   ├── app.go              # App struct and Run method
 │   └── options.go          # WithServer, WithMigration, WithBeforeStart, etc.
-├── cache/                  # Redis client manager (go-redis)
-│   ├── cache.go            # Init, Client, slow-command hook
-│   └── options.go          # WithAddr, WithAddrAuth, WithConfig
+├── cache/                  # Cache client manager (memory + Redis)
+│   ├── cache.go            # Cache interface, Init, Client, registry
+│   ├── memory.go           # In-memory backend with TTL and cleanup
+│   ├── redis.go            # Redis backend with slow-command hook
+│   └── options.go          # WithMemory, WithRedis, WithRedisAuth, WithConfig
 ├── config/                 # Viper-backed config loader
 │   ├── config.go           # Load, viperConfig implementation
 │   └── options.go          # WithFile, WithEnv, WithWatch

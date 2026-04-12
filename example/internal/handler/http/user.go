@@ -21,6 +21,7 @@ func (h *UserHandler) RegisterRoutes(r *gin.Engine) {
 	g.POST("", h.Create)
 	g.GET("", h.List)
 	g.GET("/:id", h.Get)
+	g.GET("/:id/cached", h.GetCached)
 }
 
 func (h *UserHandler) Create(c *gin.Context) {
@@ -61,4 +62,18 @@ func (h *UserHandler) List(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, users)
+}
+
+func (h *UserHandler) GetCached(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	u, err := h.svc.GetCached(c.Request.Context(), uint(id))
+	if err != nil {
+		c.Error(err) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, u)
 }
