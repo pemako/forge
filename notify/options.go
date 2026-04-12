@@ -1,5 +1,7 @@
 package notify
 
+import "github.com/pemako/mk/core"
+
 // EmailConfig holds the SMTP connection settings for the Email channel.
 // Port 465 uses implicit TLS (SMTPS); port 587 uses STARTTLS.
 type EmailConfig struct {
@@ -66,4 +68,44 @@ func WithWeCom(webhookURL string) Option {
 // The Feishu channel uses Message.Body (plain text).
 func WithFeishu(webhookURL string) Option {
 	return func(o *options) { o.feishu = webhookURL }
+}
+
+// WithConfig reads notify channel settings from core.Config.
+// Keys:
+//
+//	notify.dingtalk_webhook  — DingTalk robot webhook URL
+//	notify.wecom_webhook     — WeChat Work robot webhook URL
+//	notify.feishu_webhook    — Feishu robot webhook URL
+//	notify.email.host, .port, .username, .password, .from
+//	notify.sms.access_key, .secret_key, .sign_name, .template_code, .region
+func WithConfig(cfg core.Config) Option {
+	return func(o *options) {
+		if v := cfg.GetString("notify.dingtalk_webhook"); v != "" {
+			o.dingtalk = v
+		}
+		if v := cfg.GetString("notify.wecom_webhook"); v != "" {
+			o.wecom = v
+		}
+		if v := cfg.GetString("notify.feishu_webhook"); v != "" {
+			o.feishu = v
+		}
+		if host := cfg.GetString("notify.email.host"); host != "" {
+			o.email = &EmailConfig{
+				Host:     host,
+				Port:     cfg.GetInt("notify.email.port"),
+				Username: cfg.GetString("notify.email.username"),
+				Password: cfg.GetString("notify.email.password"),
+				From:     cfg.GetString("notify.email.from"),
+			}
+		}
+		if ak := cfg.GetString("notify.sms.access_key"); ak != "" {
+			o.sms = &SMSConfig{
+				AccessKey:    ak,
+				SecretKey:    cfg.GetString("notify.sms.secret_key"),
+				SignName:     cfg.GetString("notify.sms.sign_name"),
+				TemplateCode: cfg.GetString("notify.sms.template_code"),
+				Region:       cfg.GetString("notify.sms.region"),
+			}
+		}
+	}
 }

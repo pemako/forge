@@ -1,11 +1,16 @@
 package circuitbreaker
 
-import "time"
+import (
+	"time"
+
+	"github.com/pemako/mk/core"
+)
 
 type options struct {
 	threshold     int
 	timeout       time.Duration
 	onStateChange func(name string, from, to State)
+	cfg           core.Config // set by WithConfig; applied in New using the breaker name
 }
 
 // Option configures a CircuitBreaker at construction time.
@@ -38,4 +43,13 @@ func WithOnStateChange(fn func(name string, from, to State)) Option {
 
 func defaultOptions() options {
 	return options{threshold: 5, timeout: 30 * time.Second}
+}
+
+// WithConfig reads circuit breaker settings for the named breaker from cfg.
+// New(name, WithConfig(cfg)) reads keys under "circuitbreaker.<name>.*":
+//
+//	circuitbreaker.<name>.threshold  — consecutive failures to open (int)
+//	circuitbreaker.<name>.timeout    — open→half-open recovery delay (duration)
+func WithConfig(cfg core.Config) Option {
+	return func(o *options) { o.cfg = cfg }
 }

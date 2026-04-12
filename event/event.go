@@ -120,9 +120,13 @@ func (b *Bus) Publish(ctx context.Context, topic string, payload any) error {
 
 	if b.async {
 		for _, h := range handlers {
+			h := h
 			go func() {
-				if err := h(ctx, payload); err != nil {
-					b.log.Error(ctx, "event handler error",
+				// Use a detached context so handler is not cancelled when
+				// the caller's request context is cancelled.
+				asyncCtx := context.WithoutCancel(ctx)
+				if err := h(asyncCtx, payload); err != nil {
+					b.log.Error(asyncCtx, "event handler error",
 						core.Field{Key: "topic", Value: topic},
 						core.Field{Key: "err", Value: err.Error()},
 					)

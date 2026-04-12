@@ -88,3 +88,27 @@ func defaultOptions() options {
 		log:    logger.Default(),
 	}
 }
+
+// WithConfig reads auth settings from core.Config.
+// Keys: auth.secret (HMAC signing secret), auth.expire (token duration, e.g. "24h"),
+// auth.issuer (optional "iss" claim).
+func WithConfig(cfg core.Config) Option {
+	return func(o *options) {
+		if v := cfg.GetString("auth.secret"); v != "" {
+			// reuse WithSecret logic
+			o.secret = []byte(v)
+			o.keyFunc = func(t *jwt.Token) (any, error) {
+				if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, jwt.ErrSignatureInvalid
+				}
+				return o.secret, nil
+			}
+		}
+		if v := cfg.GetDuration("auth.expire"); v > 0 {
+			o.expire = v
+		}
+		if v := cfg.GetString("auth.issuer"); v != "" {
+			o.issuer = v
+		}
+	}
+}

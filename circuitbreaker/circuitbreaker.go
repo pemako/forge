@@ -36,7 +36,7 @@ package circuitbreaker
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
@@ -47,7 +47,7 @@ import (
 // ErrOpen is returned by Execute when the circuit is open and the request was
 // rejected without calling the wrapped function. Callers should use
 // errors.Is(err, ErrOpen) to detect this condition and apply a fallback.
-var ErrOpen = fmt.Errorf("circuit breaker open")
+var ErrOpen = errors.New("circuit breaker open")
 
 // State represents the current circuit breaker state.
 // Use State.String for a human-readable representation.
@@ -103,6 +103,16 @@ func New(name string, opts ...Option) *CircuitBreaker {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	// Apply config overrides using the breaker name.
+	if o.cfg != nil {
+		prefix := "circuitbreaker." + name + "."
+		if v := o.cfg.GetInt(prefix + "threshold"); v > 0 {
+			o.threshold = v
+		}
+		if v := o.cfg.GetDuration(prefix + "timeout"); v > 0 {
+			o.timeout = v
+		}
+	}
 	return &CircuitBreaker{
 		name: name,
 		opts: o,
@@ -122,7 +132,7 @@ func (cb *CircuitBreaker) Execute(ctx context.Context, fn func(context.Context) 
 	}
 
 	err := fn(ctx)
-	cb.record(err)
+	cb.record(ctx, err)
 	return err
 }
 
@@ -160,20 +170,20 @@ func (cb *CircuitBreaker) allow() error {
 	}
 }
 
-func (cb *CircuitBreaker) record(err error) {
+func (cb *CircuitBreaker) record(ctx context.Context, err error) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
 	if err == nil {
-		cb.onSuccess()
+		cb.onSuccess(ctx)
 	} else {
-		cb.onFailure()
+		cb.onFailure(ctx)
 	}
 }
 
-func (cb *CircuitBreaker) onSuccess() {
+func (cb *CircuitBreaker) onSuccess(ctx context.Context) {
 	if cb.state == StateHalfOpen {
-		cb.log.Info(context.Background(), "circuit breaker closed",
+		cb.log.Info(ctx, "circuit breaker closed",
 			core.Field{Key: "name", Value: cb.name})
 		cb.toState(StateClosed)
 		if cb.opts.onStateChange != nil {
@@ -183,10 +193,10 @@ func (cb *CircuitBreaker) onSuccess() {
 	cb.failures = 0
 }
 
-func (cb *CircuitBreaker) onFailure() {
+func (cb *CircuitBreaker) onFailure(ctx context.Context) {
 	cb.failures++
 	if cb.state == StateHalfOpen || cb.failures >= cb.opts.threshold {
-		cb.log.Warn(context.Background(), "circuit breaker opened",
+		cb.log.Warn(ctx, "circuit breaker opened",
 			core.Field{Key: "name", Value: cb.name},
 			core.Field{Key: "failures", Value: cb.failures})
 		prev := cb.state

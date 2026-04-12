@@ -1,3 +1,19 @@
+// Package stream provides distributed pub/sub and work-queue messaging
+// backed by Redis Streams (XADD / XREADGROUP). It requires Redis 5.0+.
+//
+// Two delivery modes:
+//   - Work queue (WithGroup): only ONE instance processes each message.
+//   - Broadcast (WithBroadcast): EVERY instance receives each message.
+//
+// The Redis client is provided by the caller — typically via
+// cache.RedisClient("name") to share an existing connection:
+//
+//	stream.Init(cache.RedisClient("redis"))
+//	stream.Subscribe("order.created",
+//	    stream.WithGroup("order-service"),
+//	    stream.WithHandler(handler),
+//	)
+//	app.New(app.WithServer(stream.Worker()))
 package stream
 
 import (

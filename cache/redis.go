@@ -52,6 +52,9 @@ func (r *redisCache) Exists(ctx context.Context, key string) (bool, error) {
 	return n > 0, err
 }
 
+// Close closes the underlying Redis connection pool.
+func (r *redisCache) Close() error { return r.client.Close() }
+
 type logHook struct {
 	name string
 	log  core.Logger

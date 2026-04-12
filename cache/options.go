@@ -1,9 +1,3 @@
-// Package cache provides cache client management for mk services.
-// It maintains a global registry of named Cache instances so that
-// any package can retrieve a client without dependency injection.
-// Backends: in-memory (default) or Redis (configured via backend: redis).
-//
-// Use Init to initialize backends, and Client to retrieve one by name.
 package cache
 
 import "github.com/pemako/mk/core"
@@ -47,29 +41,40 @@ func WithRedisAuth(name, addr, password string, db int) Option {
 	}
 }
 
-// WithConfig reads cache instances from core.Config.
-// Each named instance (default, session, etc.) requires a backend field.
+// WithConfig reads all named cache instances from core.Config.
+// Every key under "cache" that has a non-empty "backend" field is registered.
 //
 //	cache:
 //	  default:
-//	    backend: memory      # or redis
-//	  session:
+//	    backend: memory
+//	  redis:
 //	    backend: redis
 //	    addr: "redis:6379"
+//	  session:
+//	    backend: redis
+//	    addr: "redis-session:6379"
 func WithConfig(cfg core.Config) Option {
 	return func(o *options) {
-		for _, name := range []string{"default", "session"} {
-			backend := cfg.GetString("cache." + name + ".backend")
-			if backend == "" {
-				// Skip unconfigured instances
+		// Scan the entire cache sub-tree into a map of backend configs.
+		var entries map[string]struct {
+			Backend  string `mapstructure:"backend"`
+			Addr     string `mapstructure:"addr"`
+			Password string `mapstructure:"password"`
+			DB       int    `mapstructure:"db"`
+		}
+		if err := cfg.Scan("cache", &entries); err != nil || len(entries) == 0 {
+			return
+		}
+		for name, e := range entries {
+			if e.Backend == "" {
 				continue
 			}
 			o.backends = append(o.backends, backendEntry{
 				name:     name,
-				backend:  backend,
-				addr:     cfg.GetString("cache." + name + ".addr"),
-				password: cfg.GetString("cache." + name + ".password"),
-				db:       cfg.GetInt("cache." + name + ".db"),
+				backend:  e.Backend,
+				addr:     e.Addr,
+				password: e.Password,
+				db:       e.DB,
 			})
 		}
 	}

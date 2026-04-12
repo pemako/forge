@@ -36,6 +36,14 @@ import (
 )
 
 var (
+	// ErrValidationFailed is the sentinel for validation errors.
+	// Callers can use errors.Is(err, validate.ErrValidationFailed) to check.
+	ErrValidationFailed = mkerrors.Define(400, "VALIDATION_FAILED", "validation failed")
+	// ErrBadRequest is used when binding fails (malformed JSON, etc.).
+	ErrBadRequest = mkerrors.Define(400, "BAD_REQUEST", "bad request")
+)
+
+var (
 	once     sync.Once
 	instance *validator.Validate
 )
@@ -77,7 +85,7 @@ func Struct(obj any) error {
 // regardless of Content-Type.
 func Bind(c *gin.Context, obj any) error {
 	if err := c.ShouldBind(obj); err != nil {
-		return mkerrors.Define(400, "BAD_REQUEST", err.Error())
+		return mkerrors.Wrap(ErrBadRequest, "%s", err.Error())
 	}
 	return Struct(obj)
 }
@@ -86,7 +94,7 @@ func Bind(c *gin.Context, obj any) error {
 // Use struct tags: `json:"field"` for binding, `validate:"required,..."` for rules.
 func BindJSON(c *gin.Context, obj any) error {
 	if err := c.ShouldBindJSON(obj); err != nil {
-		return mkerrors.Define(400, "BAD_REQUEST", err.Error())
+		return mkerrors.Wrap(ErrBadRequest, "%s", err.Error())
 	}
 	return Struct(obj)
 }
@@ -96,7 +104,7 @@ func BindJSON(c *gin.Context, obj any) error {
 // Use struct tags: `form:"field"` for binding, `validate:"required,..."` for rules.
 func BindForm(c *gin.Context, obj any) error {
 	if err := c.ShouldBind(obj); err != nil {
-		return mkerrors.Define(400, "BAD_REQUEST", err.Error())
+		return mkerrors.Wrap(ErrBadRequest, "%s", err.Error())
 	}
 	return Struct(obj)
 }
@@ -109,7 +117,7 @@ func BindForm(c *gin.Context, obj any) error {
 //	}
 func BindQuery(c *gin.Context, obj any) error {
 	if err := c.ShouldBindQuery(obj); err != nil {
-		return mkerrors.Define(400, "BAD_REQUEST", err.Error())
+		return mkerrors.Wrap(ErrBadRequest, "%s", err.Error())
 	}
 	return Struct(obj)
 }
@@ -122,7 +130,7 @@ func BindQuery(c *gin.Context, obj any) error {
 //	}
 func BindURI(c *gin.Context, obj any) error {
 	if err := c.ShouldBindUri(obj); err != nil {
-		return mkerrors.Define(400, "BAD_REQUEST", err.Error())
+		return mkerrors.Wrap(ErrBadRequest, "%s", err.Error())
 	}
 	return Struct(obj)
 }
@@ -132,14 +140,13 @@ func BindURI(c *gin.Context, obj any) error {
 func toCodedError(err error) error {
 	var ve validator.ValidationErrors
 	if !errors.As(err, &ve) {
-		return mkerrors.Define(400, "VALIDATION_FAILED", err.Error())
+		return mkerrors.Wrap(ErrValidationFailed, "%s", err.Error())
 	}
 	metadata := make(map[string]any, len(ve))
 	for _, fe := range ve {
-		field := strings.ToLower(fe.Field())
-		metadata[field] = fe.Tag()
+		metadata[strings.ToLower(fe.Field())] = fe.Tag()
 	}
-	ce := mkerrors.Define(400, "VALIDATION_FAILED", "validation failed")
-	ce.Metadata = metadata
-	return ce
+	wrapped := mkerrors.Wrap(ErrValidationFailed, "validation failed")
+	wrapped.Metadata = metadata
+	return wrapped
 }

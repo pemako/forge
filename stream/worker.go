@@ -13,6 +13,7 @@ import (
 type streamWorker struct {
 	done chan struct{}
 	log  core.Logger
+	wg   sync.WaitGroup // tracks in-flight process() calls
 }
 
 // Start implements core.Server. It blocks until Stop is called.
@@ -65,6 +66,7 @@ func (w *streamWorker) Stop(_ context.Context) error {
 	default:
 		close(w.done)
 	}
+	w.wg.Wait() // wait for all in-flight process() calls to finish
 	return nil
 }
 
@@ -104,7 +106,11 @@ func (w *streamWorker) consume(sub subscription) {
 
 		for _, s := range result {
 			for _, msg := range s.Messages {
-				w.process(ctx, sub, msg)
+				w.wg.Add(1)
+				go func(m redis.XMessage) {
+					defer w.wg.Done()
+					w.process(ctx, sub, m)
+				}(msg)
 			}
 		}
 	}

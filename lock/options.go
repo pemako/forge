@@ -43,6 +43,20 @@ func newOptionsDefaults(opts []Option) newOptions {
 	return o
 }
 
+// WithConfig reads lock settings from core.Config.
+// Keys: lock.password, lock.db.
+// Used together with NewFromConfig which reads lock.addr.
+func WithConfig(cfg core.Config) Option {
+	return func(o *newOptions) {
+		if v := cfg.GetString("lock.password"); v != "" {
+			o.password = v
+		}
+		if v := cfg.GetInt("lock.db"); v != 0 {
+			o.db = v
+		}
+	}
+}
+
 // --- Per-operation options (used with TryLock) ---
 
 type tryLockOptions struct {

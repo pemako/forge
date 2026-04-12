@@ -88,3 +88,6 @@ func (c *memoryCache) Exists(ctx context.Context, key string) (bool, error) {
 	}
 	return err == nil, err
 }
+
+// Close is a no-op for the in-memory backend.
+func (c *memoryCache) Close() error { return nil }

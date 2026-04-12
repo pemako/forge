@@ -56,6 +56,15 @@ func NewWithClient(rdb *redis.Client, opts ...Option) *Locker {
 	return &Locker{client: rdb, log: o.log}
 }
 
+// NewFromConfig creates a Locker reading the Redis address from core.Config
+// (key: lock.addr) plus optional password/db via WithConfig.
+//
+//	locker := lock.NewFromConfig(cfg, lock.WithLogger(log))
+func NewFromConfig(cfg core.Config, opts ...Option) *Locker {
+	addr := cfg.GetString("lock.addr")
+	return New(addr, append([]Option{WithConfig(cfg)}, opts...)...)
+}
+
 // Acquire attempts to set key in Redis with a unique token and the given TTL.
 // Returns (true, nil) if the lock was acquired, (false, nil) if the key is
 // already held by another caller, or (false, err) on a Redis error.

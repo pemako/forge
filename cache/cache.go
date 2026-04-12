@@ -1,3 +1,20 @@
+// Package cache provides a unified caching abstraction with in-memory and
+// Redis backends. The in-memory backend is the default and requires no
+// external dependencies. The Redis backend is optional and configured via
+// WithRedis or WithConfig.
+//
+// A package-level registry stores named Cache instances. All instances that
+// need Redis share the connection through cache.RedisClient, which is also
+// used by the lock and stream packages.
+//
+// Example:
+//
+//	cache.Init(
+//	    cache.WithMemory("default"),
+//	    cache.WithRedis("redis", "redis:6379"),
+//	)
+//	c := cache.Client("default")
+//	c.Set(ctx, "key", "value", time.Hour)
 package cache
 
 import (
@@ -24,6 +41,10 @@ type Cache interface {
 	Del(ctx context.Context, keys ...string) error
 	// Exists reports whether key exists and has not expired.
 	Exists(ctx context.Context, key string) (bool, error)
+	// Close releases resources held by this cache backend.
+	// For in-memory backends this is a no-op.
+	// For Redis backends it closes the underlying connection pool.
+	Close() error
 }
 
 var (
@@ -42,6 +63,8 @@ func Init(opts ...Option) error {
 		o.logger = logger.Default()
 	}
 
+	// Build all backends first, then lock once for registry writes.
+	built := make(map[string]Cache, len(o.backends))
 	for _, e := range o.backends {
 		var c Cache
 		var err error
@@ -54,10 +77,14 @@ func Init(opts ...Option) error {
 		default: // "memory" or empty
 			c = newMemoryCache()
 		}
-		registryMu.Lock()
-		registry[e.name] = c
-		registryMu.Unlock()
+		built[e.name] = c
 	}
+
+	registryMu.Lock()
+	for name, c := range built {
+		registry[name] = c
+	}
+	registryMu.Unlock()
 	return nil
 }
 
@@ -81,4 +108,31 @@ func RedisClient(name string) *redis.Client {
 		return rc.client
 	}
 	return nil
+}
+
+// Close closes the named cache backend and removes it from the registry.
+func Close(name string) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	c, ok := registry[name]
+	if !ok {
+		return nil
+	}
+	delete(registry, name)
+	return c.Close()
+}
+
+// CloseAll closes all registered cache backends.
+// Call in app.WithAfterStop to release Redis connections on shutdown.
+func CloseAll() error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	var first error
+	for name, c := range registry {
+		if err := c.Close(); err != nil && first == nil {
+			first = err
+		}
+		delete(registry, name)
+	}
+	return first
 }
