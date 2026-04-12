@@ -8,11 +8,23 @@
 package httpserver
 
 import (
+	"context"
 	"net"
 	"time"
 
 	"github.com/pemako/mk/core"
 )
+
+// ReadyCheckFunc is a custom readiness check function.
+// Return nil when the component is ready; return an error to signal not ready.
+// The check name is used as the key in the /readyz response body.
+type ReadyCheckFunc func(ctx context.Context) error
+
+// readyCheck pairs a name with its check function.
+type readyCheck struct {
+	name string
+	fn   ReadyCheckFunc
+}
 
 // options holds the functional configuration for New.
 type options struct {
@@ -23,6 +35,7 @@ type options struct {
 	serviceName    string
 	serviceVersion string
 	listener       net.Listener
+	readyChecks    []readyCheck
 }
 
 // Option is a functional option for configuring the HTTP server.
@@ -56,6 +69,30 @@ func WithWriteTimeout(d time.Duration) Option { return func(o *options) { o.writ
 // srv.ListenAndServe, which allows using ":0" (random port) in tests.
 func WithListener(lis net.Listener) Option {
 	return func(o *options) { o.listener = lis }
+}
+
+// WithReadyCheck registers a named readiness check function.
+// The /readyz endpoint calls all registered checks in addition to the
+// SetReady flag. If any check returns an error, /readyz returns 503 with
+// a JSON body listing each check's status.
+//
+// Multiple checks can be registered; all must pass for the server to be ready:
+//
+//	httpserver.New(
+//	    httpserver.WithReadyCheck("database", func(ctx context.Context) error {
+//	        return database.DB("default").WithContext(ctx).Exec("SELECT 1").Error
+//	    }),
+//	    httpserver.WithReadyCheck("cache", func(ctx context.Context) error {
+//	        c := cache.Client("default")
+//	        if c == nil { return errors.New("not initialized") }
+//	        _, err := c.Exists(ctx, "__health")
+//	        return err
+//	    }),
+//	)
+func WithReadyCheck(name string, fn ReadyCheckFunc) Option {
+	return func(o *options) {
+		o.readyChecks = append(o.readyChecks, readyCheck{name: name, fn: fn})
+	}
 }
 
 // WithConfig reads HTTP server settings from core.Config:

@@ -67,7 +67,7 @@ func New(opts ...Option) (*ginServer, error) {
 	// Register /readyz after s is created so the closure captures the instance.
 	r.GET("/readyz", readyzHandler(o.serviceName, o.serviceVersion, func() bool {
 		return s.ready.Load()
-	}))
+	}, o.readyChecks))
 
 	return s, nil
 }
