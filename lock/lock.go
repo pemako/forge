@@ -1,4 +1,5 @@
 // lock/lock.go
+// Locker implementation: Acquire, Release, and TryLock.
 package lock
 
 import (
@@ -25,7 +26,9 @@ else
 end`
 )
 
-// Locker provides distributed locking backed by Redis.
+// Locker provides distributed mutual exclusion backed by Redis.
+// Lock acquisition and release use Lua scripts for atomicity, ensuring that
+// only the instance that acquired a lock can release it.
 // Create with New or NewWithClient; all methods are safe for concurrent use.
 type Locker struct {
 	client *redis.Client
@@ -33,7 +36,8 @@ type Locker struct {
 	tokens sync.Map // key → token for this Locker instance
 }
 
-// New creates a Locker that manages its own Redis connection to addr.
+// New creates a Locker that opens its own Redis connection to addr.
+// Use NewWithClient when sharing a pre-existing *redis.Client.
 func New(addr string, opts ...Option) *Locker {
 	o := newOptionsDefaults(opts)
 	rdb := redis.NewClient(&redis.Options{
@@ -51,8 +55,10 @@ func NewWithClient(rdb *redis.Client, opts ...Option) *Locker {
 	return &Locker{client: rdb, log: o.log}
 }
 
-// Acquire attempts to acquire the lock for key with the given TTL.
-// Returns (true, nil) if acquired, (false, nil) if already held by another.
+// Acquire attempts to set key in Redis with a unique token and the given TTL.
+// Returns (true, nil) if the lock was acquired, (false, nil) if the key is
+// already held by another caller, or (false, err) on a Redis error.
+// See TryLock for an acquire-execute-release convenience wrapper.
 func (l *Locker) Acquire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	token := uuid.NewString()
 	result, err := l.client.Eval(ctx, acquireLua, []string{key}, token, ttl.Milliseconds()).Text()
@@ -67,8 +73,10 @@ func (l *Locker) Acquire(ctx context.Context, key string, ttl time.Duration) (bo
 	return false, nil
 }
 
-// Release releases the lock for key. It is a no-op if this Locker did not
-// acquire the lock (token mismatch — safe against releasing foreign locks).
+// Release deletes the lock for key from Redis, but only if this Locker holds
+// it (i.e. the stored token matches). It is a no-op if this Locker never
+// acquired key, preventing accidental release of a lock owned by another
+// instance after a TTL expiry.
 func (l *Locker) Release(ctx context.Context, key string) error {
 	val, ok := l.tokens.Load(key)
 	if !ok {

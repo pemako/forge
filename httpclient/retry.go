@@ -1,4 +1,7 @@
 // httpclient/retry.go
+// Retry helpers for httpclient. These are intentionally unexported; external
+// consumers configure retry behaviour through WithRetry, WithRetryBaseDelay,
+// and WithRetryMaxDelay options.
 package httpclient
 
 import (
@@ -38,6 +41,8 @@ func backoffDelay(attempt int, base, maxDelay time.Duration) time.Duration {
 }
 
 // ExportedBackoffDelay exposes backoffDelay for white-box testing.
+// External packages should not rely on this function; it may be removed in a
+// future version.
 func ExportedBackoffDelay(attempt int, base, maxDelay time.Duration) time.Duration {
 	return backoffDelay(attempt, base, maxDelay)
 }

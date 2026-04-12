@@ -1,4 +1,6 @@
 // grpcclient/interceptors.go
+// Unary client interceptors used by Dial: logging and retry.
+// These are package-internal; callers configure behaviour through Options.
 package grpcclient
 
 import (

@@ -1,4 +1,5 @@
 // lock/options.go
+// Constructor options (Option) and per-operation options (TryLockOption).
 package lock
 
 import (
@@ -53,8 +54,10 @@ type tryLockOptions struct {
 // TryLockOption configures a single TryLock call.
 type TryLockOption func(*tryLockOptions)
 
-// WithWait makes TryLock poll for the lock until timeout or acquisition.
-// interval controls how often to retry (e.g., 200ms).
+// WithWait makes TryLock poll for the lock until the timeout elapses or the
+// lock is acquired. interval controls how often to retry (e.g., 200ms).
+// Without WithWait, TryLock returns ErrLockNotAcquired immediately if the lock
+// is held by another caller.
 func WithWait(timeout, interval time.Duration) TryLockOption {
 	return func(o *tryLockOptions) {
 		o.waitTimeout = timeout

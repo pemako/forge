@@ -1,4 +1,5 @@
 // httpclient/client.go
+// Core Client implementation, named registry, and Init helper.
 package httpclient
 
 import (
@@ -15,7 +16,8 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-// Response holds the raw HTTP response.
+// Response holds the raw HTTP response returned by Do.
+// Body contains the full, already-read response body bytes.
 type Response struct {
 	StatusCode int
 	Body       []byte
@@ -29,6 +31,10 @@ type Client struct {
 }
 
 // New creates a Client with the given options.
+// The underlying http.Transport is wrapped with otelhttp so every request
+// carries the current trace context. Default timeout is 30 s; default retry
+// count is 0 (no retry). See WithRetry, WithRetryBaseDelay, WithRetryMaxDelay
+// to configure exponential-backoff retry behaviour.
 func New(opts ...Option) *Client {
 	o := defaultOptions()
 	for _, opt := range opts {
@@ -40,31 +46,39 @@ func New(opts ...Option) *Client {
 	}
 }
 
-// Get performs a GET request and decodes the JSON response into out (pointer).
+// Get performs a GET request to baseURL+path and decodes the JSON response
+// body into out, which must be a non-nil pointer. Returns an error if the
+// status code is >= 400.
 func (c *Client) Get(ctx context.Context, path string, out any) error {
 	_, err := c.do(ctx, http.MethodGet, path, nil, out)
 	return err
 }
 
-// Post performs a POST with body serialised as JSON, decoding the response into out.
+// Post performs a POST request to baseURL+path. body is JSON-marshalled and
+// sent as the request body (Content-Type: application/json). The response body
+// is JSON-decoded into out, which must be a non-nil pointer or nil to discard.
 func (c *Client) Post(ctx context.Context, path string, body, out any) error {
 	_, err := c.do(ctx, http.MethodPost, path, body, out)
 	return err
 }
 
-// Put performs a PUT with body serialised as JSON, decoding the response into out.
+// Put performs a PUT request to baseURL+path. body is JSON-marshalled and
+// sent as the request body. The response body is decoded into out.
 func (c *Client) Put(ctx context.Context, path string, body, out any) error {
 	_, err := c.do(ctx, http.MethodPut, path, body, out)
 	return err
 }
 
-// Delete performs a DELETE request.
+// Delete performs a DELETE request to baseURL+path. If out is non-nil, the
+// response body is JSON-decoded into it.
 func (c *Client) Delete(ctx context.Context, path string, out any) error {
 	_, err := c.do(ctx, http.MethodDelete, path, nil, out)
 	return err
 }
 
-// Do performs a raw request. bodyBytes must be []byte or nil.
+// Do performs a raw request using the given method and path. bodyBytes must be
+// pre-serialised bytes or nil. The raw Response is returned on success;
+// response body decoding is the caller's responsibility.
 func (c *Client) Do(ctx context.Context, method, path string, bodyBytes []byte) (*Response, error) {
 	return c.do(ctx, method, path, bodyBytes, nil)
 }
@@ -172,21 +186,29 @@ var (
 	registryMu sync.RWMutex
 )
 
-// Register creates and stores a named Client in the global registry.
+// Register creates a Client with the given options and stores it in the global
+// registry under name, replacing any previously registered client with the
+// same name. Retrieve it later with Get.
 func Register(name string, opts ...Option) {
 	registryMu.Lock()
 	registry[name] = New(opts...)
 	registryMu.Unlock()
 }
 
-// Get returns the named Client, or nil if not registered.
+// Get returns the named Client previously stored by Register, or nil if no
+// client with that name has been registered.
 func Get(name string) *Client {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	return registry[name]
 }
 
-// Init reads named httpclient instances from cfg and registers them.
+// Init reads named httpclient instances from cfg and registers each one.
+// names defaults to ["default"] when omitted. Config keys follow the pattern
+// "httpclient.<name>.base_url", "httpclient.<name>.timeout", and
+// "httpclient.<name>.retry". Each registered client is retrievable via Get.
+//
+// Example YAML:
 //
 //	httpclient:
 //	  default:

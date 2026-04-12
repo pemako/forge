@@ -1,4 +1,5 @@
 // grpcclient/client.go
+// Dial, named registry, and Init for the grpcclient package.
 package grpcclient
 
 import (
@@ -12,7 +13,15 @@ import (
 )
 
 // Dial creates a new gRPC client connection to target using grpc.NewClient.
-// Connection is lazy — no network activity until the first RPC call.
+// The connection is lazy — no network activity occurs until the first RPC.
+// An otelgrpc stats handler is installed for automatic trace propagation.
+// Unary interceptors for logging and retry are chained in that order.
+// TLS credentials are selected based on the supplied options:
+//   - WithInsecure: plaintext (no TLS)
+//   - WithTLS: one-way TLS verified against caCert
+//   - WithMTLS: mutual TLS with client certificate
+//
+// The returned *grpc.ClientConn must be closed by the caller (or CloseAll).
 func Dial(target string, opts ...Option) (*grpc.ClientConn, error) {
 	o := defaultOptions()
 	for _, opt := range opts {
@@ -60,7 +69,8 @@ var (
 	registryMu sync.RWMutex
 )
 
-// Register dials and stores a named connection in the global registry.
+// Register dials target and stores the resulting connection in the global
+// registry under name, making it retrievable with Get. Returns any dial error.
 func Register(name, target string, opts ...Option) error {
 	conn, err := Dial(target, opts...)
 	if err != nil {
@@ -72,15 +82,17 @@ func Register(name, target string, opts ...Option) error {
 	return nil
 }
 
-// Get returns the named connection, or nil if not registered.
+// Get returns the named *grpc.ClientConn previously stored by Register, or nil
+// if no connection with that name has been registered.
 func Get(name string) *grpc.ClientConn {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	return registry[name]
 }
 
-// CloseAll closes all registered connections and clears the registry.
-// Call in app.WithAfterStop to drain connections on shutdown.
+// CloseAll closes every connection in the global registry and clears it.
+// Call this in an application shutdown hook (e.g. app.WithAfterStop) to drain
+// in-flight RPCs before the process exits.
 func CloseAll() {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -90,7 +102,12 @@ func CloseAll() {
 	}
 }
 
-// Init reads named gRPC connections from cfg and registers them.
+// Init reads named gRPC connection configs and registers each one.
+// Config keys follow the pattern "grpcclient.<name>.addr", ".insecure",
+// ".timeout", and ".retry". Services whose addr key is empty are silently
+// skipped. Returns the first dial error encountered.
+//
+// Example YAML:
 //
 //	grpcclient:
 //	  user-service:

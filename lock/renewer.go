@@ -1,4 +1,5 @@
 // lock/renewer.go
+// Background TTL renewal for held locks.
 package lock
 
 import (

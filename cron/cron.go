@@ -1,4 +1,5 @@
 // cron/cron.go
+// Scheduler type, Add/Remove, and core.Server implementation.
 package cron
 
 import (
@@ -19,7 +20,9 @@ type tickerJob struct {
 }
 
 // Scheduler manages named cron jobs and implements core.Server so it integrates
-// with app lifecycle management via app.WithServer.
+// with application lifecycle management via app.WithServer. Standard-interval
+// jobs are driven by github.com/robfig/cron; sub-second @every jobs use a
+// dedicated time.Ticker goroutine.
 type Scheduler struct {
 	c           *robfigcron.Cron
 	opts        schedulerOptions
@@ -30,6 +33,8 @@ type Scheduler struct {
 }
 
 // New creates a new Scheduler with the given options.
+// The scheduler does not start running jobs until Start is called (or
+// app.WithServer calls it automatically).
 func New(opts ...Option) *Scheduler {
 	o := defaultSchedulerOptions()
 	for _, opt := range opts {
@@ -61,8 +66,11 @@ func parseEveryDuration(spec string) (time.Duration, bool) {
 }
 
 // Add registers a named job with the given cron spec and per-job options.
-// spec uses standard 5-field cron syntax or robfig shorthand (@every 5m, @hourly, etc.).
-// Sub-second @every durations (e.g. "@every 50ms") are handled with a ticker.
+// spec accepts standard 5-field cron syntax ("0 * * * *") or robfig shorthand
+// (@hourly, @daily, @every 5m, etc.). Sub-second @every durations
+// (e.g. "@every 50ms") are handled with a time.Ticker rather than the
+// underlying cron library. Returns an error if the spec is invalid or if a
+// ticker job with the same name is already registered.
 func (s *Scheduler) Add(name, spec string, fn func(context.Context) error, opts ...JobOption) error {
 	jo := defaultJobOptions()
 	for _, opt := range opts {
@@ -116,8 +124,9 @@ func (s *Scheduler) addTickerJob(name string, interval time.Duration, fn func(co
 	return nil
 }
 
-// Remove unregisters the job with the given name.
-// Any currently running execution finishes normally.
+// Remove unregisters the named job and stops its ticker (if applicable).
+// For ticker jobs, Remove blocks until the currently running execution finishes.
+// Any in-progress execution of a standard cron job is allowed to finish normally.
 func (s *Scheduler) Remove(name string) {
 	if id, ok := s.entryIDs[name]; ok {
 		s.c.Remove(id)
@@ -138,16 +147,20 @@ func (s *Scheduler) Remove(name string) {
 	}
 }
 
-// Start implements core.Server. It starts the scheduler and blocks until Stop
-// is called. Run inside a goroutine — app.WithServer handles this automatically.
+// Start implements core.Server. It starts the underlying cron scheduler and
+// all registered ticker jobs, then blocks until Stop is called.
+// This method is intended to be run in a goroutine; app.WithServer handles
+// this automatically.
 func (s *Scheduler) Start(_ context.Context) error {
 	s.c.Start()
 	<-s.done
 	return nil
 }
 
-// Stop implements core.Server. It signals Start to return and waits for all
-// running jobs to complete, or until ctx is cancelled (shutdown timeout).
+// Stop implements core.Server. It stops the scheduler, signals all ticker
+// goroutines to exit, and waits for in-flight executions to complete or until
+// ctx is cancelled (shutdown timeout). Returns ctx.Err() if the context
+// expires before all jobs have finished.
 func (s *Scheduler) Stop(ctx context.Context) error {
 	// Stop ticker jobs.
 	s.tickerJobMu.Lock()

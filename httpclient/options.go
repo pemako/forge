@@ -1,4 +1,21 @@
-// httpclient/options.go
+// Package httpclient provides an outbound HTTP client with OpenTelemetry
+// tracing, exponential-backoff retry, and JSON marshal/unmarshal helpers.
+//
+// Create a one-off client with New, or use Register/Get to manage long-lived
+// named clients. For config-driven initialization, call Init with a
+// core.Config and a list of names that map to "httpclient.<name>.*" keys.
+//
+// Typical usage:
+//
+//	c := httpclient.New(
+//	    httpclient.WithBaseURL("https://api.example.com"),
+//	    httpclient.WithTimeout(10*time.Second),
+//	    httpclient.WithRetry(3),
+//	)
+//	var result MyResponse
+//	if err := c.Get(ctx, "/v1/resource", &result); err != nil {
+//	    return err
+//	}
 package httpclient
 
 import (
@@ -61,7 +78,9 @@ func WithLogger(l core.Logger) Option {
 	return func(o *options) { o.log = l }
 }
 
-// WithConfig reads httpclient.<name> settings from core.Config.
+// withConfigEntry reads httpclient.<name>.* keys from cfg and applies them as
+// options. Keys recognised: base_url (string), timeout (duration), retry (int).
+// Unknown keys are silently ignored.
 func withConfigEntry(cfg core.Config, name string) Option {
 	return func(o *options) {
 		prefix := "httpclient." + name + "."

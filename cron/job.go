@@ -1,4 +1,5 @@
 // cron/job.go
+// Job execution helpers: panic recovery, timeout wrapping, and retry backoff.
 package cron
 
 import (
@@ -75,10 +76,7 @@ func runOnce(ctx context.Context, fn func(context.Context) error, timeout time.D
 // backoff capped at 30s.
 func cronBackoff(attempt int, base time.Duration) time.Duration {
 	const maxDelay = 30 * time.Second
-	shift := attempt - 1
-	if shift > 5 {
-		shift = 5
-	}
+	shift := min(attempt-1, 5)
 	d := base * (1 << shift)
 	if d > maxDelay {
 		return maxDelay
