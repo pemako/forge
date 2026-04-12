@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,19 @@ type createReq struct {
 	Age   int    `json:"age"   validate:"min=0,max=150"`
 }
 
+type queryReq struct {
+	Status string `form:"status" validate:"required,oneof=active inactive"`
+	Limit  int    `form:"limit"  validate:"min=1,max=100"`
+}
+
+type uriReq struct {
+	ID int64 `uri:"id" validate:"required,min=1"`
+}
+
+type formReq struct {
+	Title string `form:"title" validate:"required,min=1"`
+}
+
 func TestStruct_valid(t *testing.T) {
 	err := validate.Struct(&createReq{Name: "Alice", Email: "alice@example.com", Age: 30})
 	assert.NoError(t, err)
@@ -29,15 +43,15 @@ func TestStruct_valid(t *testing.T) {
 func TestStruct_invalid(t *testing.T) {
 	err := validate.Struct(&createReq{Name: "A", Email: "not-an-email", Age: 30})
 	require.Error(t, err)
-	assert.True(t, mkerrors.Is(err, mkerrors.ErrBadRequest) || mkerrors.Code(err) == 400)
+	assert.Equal(t, 400, mkerrors.Code(err))
 }
 
-func TestBind_valid(t *testing.T) {
+func TestBindJSON_valid(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/", func(c *gin.Context) {
 		var req createReq
-		if err := validate.Bind(c, &req); err != nil {
+		if err := validate.BindJSON(c, &req); err != nil {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
@@ -52,12 +66,12 @@ func TestBind_valid(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 }
 
-func TestBind_invalidEmail(t *testing.T) {
+func TestBindJSON_invalidEmail(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/", func(c *gin.Context) {
 		var req createReq
-		if err := validate.Bind(c, &req); err != nil {
+		if err := validate.BindJSON(c, &req); err != nil {
 			c.JSON(mkerrors.Code(err), err)
 			return
 		}
@@ -70,4 +84,98 @@ func TestBind_invalidEmail(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, 400, w.Code)
+}
+
+func TestBindQuery_valid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", func(c *gin.Context) {
+		var req queryReq
+		if err := validate.BindQuery(c, &req); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, req)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/?status=active&limit=10", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
+}
+
+func TestBindQuery_invalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", func(c *gin.Context) {
+		var req queryReq
+		if err := validate.BindQuery(c, &req); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, req)
+	})
+
+	w := httptest.NewRecorder()
+	// status must be active|inactive
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/?status=unknown&limit=10", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 400, w.Code)
+}
+
+func TestBindURI_valid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/users/:id", func(c *gin.Context) {
+		var req uriReq
+		if err := validate.BindURI(c, &req); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, req)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/users/42", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
+}
+
+func TestBindURI_invalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/users/:id", func(c *gin.Context) {
+		var req uriReq
+		if err := validate.BindURI(c, &req); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, req)
+	})
+
+	w := httptest.NewRecorder()
+	// id=0 fails validate:"min=1"
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/users/0", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 400, w.Code)
+}
+
+func TestBindForm_valid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/", func(c *gin.Context) {
+		var req formReq
+		if err := validate.BindForm(c, &req); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, req)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/",
+		strings.NewReader("title=hello"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
 }
