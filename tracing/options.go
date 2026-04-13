@@ -26,6 +26,7 @@ package tracing
 import (
 	"context"
 	"net/url"
+	"strings"
 
 	"github.com/pemako/mk/core"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -57,6 +58,16 @@ func WithSampler(ratio float64) Option { return func(o *options) { o.sampler = r
 func WithOTLP(endpoint string) Option {
 	return func(o *options) {
 		o.exporterFns = append(o.exporterFns, newOTLPExporter(endpoint))
+	}
+}
+
+// WithOTLPGRPC registers an OTLP/gRPC exporter sending spans to endpoint.
+// Use this when the collector listens on the gRPC port (commonly 4317 or 14317).
+//
+//	tracing.WithOTLPGRPC("otel-collector:14317")
+func WithOTLPGRPC(endpoint string) Option {
+	return func(o *options) {
+		o.exporterFns = append(o.exporterFns, newOTLPGRPCExporter(endpoint))
 	}
 }
 
@@ -102,13 +113,21 @@ func WithExporter(exp sdktrace.SpanExporter) Option {
 
 // WithConfig reads tracing settings from core.Config:
 //
-//	tracing.endpoint — OTLP collector URL (sets one OTLP exporter, same as WithOTLP)
+//	tracing.endpoint — collector URL or host:port
 //	tracing.sampler  — sampling ratio 0.0–1.0
 //	app.name         — service name
+//
+// Protocol is selected automatically by port:
+//   - port 4317 or 14317 → OTLP gRPC  (WithOTLPGRPC)
+//   - anything else       → OTLP HTTP  (WithOTLP)
 func WithConfig(cfg core.Config) Option {
 	return func(o *options) {
 		if v := cfg.GetString("tracing.endpoint"); v != "" {
-			WithOTLP(v)(o)
+			if isGRPCPort(v) {
+				WithOTLPGRPC(v)(o)
+			} else {
+				WithOTLP(v)(o)
+			}
 		}
 		if v := cfg.GetFloat64("tracing.sampler"); v > 0 {
 			o.sampler = v
@@ -117,6 +136,13 @@ func WithConfig(cfg core.Config) Option {
 			o.serviceName = v
 		}
 	}
+}
+
+// isGRPCPort reports whether the endpoint string looks like an OTLP gRPC address
+// (port 4317 or 14317).
+func isGRPCPort(endpoint string) bool {
+	host := endpointHost(endpoint)
+	return strings.HasSuffix(host, ":4317") || strings.HasSuffix(host, ":14317")
 }
 
 // endpointHost extracts host:port from a full URL or returns the string as-is.
