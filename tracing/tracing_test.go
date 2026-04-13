@@ -125,3 +125,10 @@ func TestProvider_multipleTracers(t *testing.T) {
 	assert.NotNil(t, t2)
 	_ = p.Shutdown(context.Background())
 }
+
+func TestProvider_ImplementsLifecycle(t *testing.T) {
+	p, err := tracing.New()
+	require.NoError(t, err)
+	require.NoError(t, p.Init(context.Background()))
+	require.NoError(t, p.Shutdown(context.Background()))
+}

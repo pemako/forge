@@ -90,6 +90,10 @@ func (p *Provider) Tracer(name string) trace.Tracer {
 	return p.tp.Tracer(name)
 }
 
+// Init is a no-op for tracing providers; all initialization happens in New.
+// Exists to satisfy the app.Lifecycle interface.
+func (p *Provider) Init(_ context.Context) error { return nil }
+
 // Shutdown flushes pending spans and releases exporter resources.
 // Register with app.WithAfterStop.
 func (p *Provider) Shutdown(ctx context.Context) error {
