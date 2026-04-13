@@ -55,7 +55,7 @@ func main() {
 	logger.SetDefault(log)
 
 	// ── Tracing ───────────────────────────────────────────────────────────
-	provider, err := tracing.New(tracing.WithConfig(cfg))
+	provider, err := tracing.New(tracing.WithConfig(cfg), tracing.WithLogger(log))
 	if err != nil {
 		log.Error(context.Background(), "tracing init failed", logger.F("err", err))
 		os.Exit(1)

@@ -39,7 +39,9 @@ import (
 type options struct {
 	serviceName string
 	sampler     float64
+	insecure    bool // default true (no TLS); set false via WithTLS
 	exporterFns []func(ctx context.Context) (sdktrace.SpanExporter, error)
+	logger      core.Logger
 }
 
 // Option is a functional option for configuring the tracing Provider.
@@ -53,6 +55,16 @@ func WithServiceName(name string) Option { return func(o *options) { o.serviceNa
 // 1.0 samples all traces; 0.0 samples none. Defaults to 1.0.
 func WithSampler(ratio float64) Option { return func(o *options) { o.sampler = ratio } }
 
+// WithTLS enables TLS for gRPC and HTTP exporters.
+// Use this when the collector requires a secure connection (most production
+// environments). By default connections are insecure (no TLS).
+func WithTLS() Option { return func(o *options) { o.insecure = false } }
+
+// WithLogger sets the logger used to surface exporter errors (e.g., connection
+// failures, TLS handshake errors). Without this option, exporter errors are
+// silently dropped.
+func WithLogger(l core.Logger) Option { return func(o *options) { o.logger = l } }
+
 // WithOTLP registers an OTLP/HTTP exporter sending spans to endpoint.
 // endpoint accepts a full URL ("http://host:4318") or bare host:port ("host:4318").
 // Use this for collectors listening on the HTTP port (4318 / 14318).
@@ -64,11 +76,14 @@ func WithOTLP(endpoint string) Option {
 
 // WithOTLPGRPC registers an OTLP/gRPC exporter sending spans to endpoint.
 // Use this for collectors listening on the gRPC port (4317 / 14317).
+// TLS is controlled by WithTLS() option or tracing.tls config key.
 //
 //	tracing.WithOTLPGRPC("otel-collector:14317")
 func WithOTLPGRPC(endpoint string) Option {
 	return func(o *options) {
-		o.exporterFns = append(o.exporterFns, newOTLPGRPCExporter(endpoint))
+		o.exporterFns = append(o.exporterFns, func(ctx context.Context) (sdktrace.SpanExporter, error) {
+			return newOTLPGRPCExporterWithOpts(ctx, endpoint, o.insecure)
+		})
 	}
 }
 
@@ -90,6 +105,7 @@ func WithExporter(exp sdktrace.SpanExporter) Option {
 //
 //	tracing.endpoint — collector URL or host:port
 //	tracing.sampler  — sampling ratio 0.0–1.0
+//	tracing.insecure — bool, default true; set false to enable TLS
 //	app.name         — service name
 //
 // Protocol is selected automatically by port:
@@ -109,6 +125,10 @@ func WithConfig(cfg core.Config) Option {
 		}
 		if v := cfg.GetString("app.name"); v != "" {
 			o.serviceName = v
+		}
+		// tracing.insecure defaults to true; explicitly set false to enable TLS
+		if cfg.GetBool("tracing.tls") {
+			o.insecure = false
 		}
 	}
 }

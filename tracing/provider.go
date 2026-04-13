@@ -12,7 +12,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pemako/mk/core"
 )
 
 // Provider wraps an OpenTelemetry TracerProvider and implements core.Provider.
@@ -31,6 +34,7 @@ func New(opts ...Option) (*Provider, error) {
 	o := options{
 		serviceName: "service",
 		sampler:     1.0,
+		insecure:    true, // default: no TLS; use WithTLS() or tracing.tls=true to enable
 	}
 	for _, opt := range opts {
 		opt(&o)
@@ -69,6 +73,15 @@ func New(opts ...Option) (*Provider, error) {
 	tp := sdktrace.NewTracerProvider(sdkOpts...)
 	otel.SetTracerProvider(tp)
 
+	// Register a global error handler so exporter errors (e.g., connection
+	// refused, TLS handshake failure) are visible instead of silently dropped.
+	if o.logger != nil {
+		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+			o.logger.Error(context.Background(), "otel exporter error",
+				core.Field{Key: "err", Value: err.Error()})
+		}))
+	}
+
 	return &Provider{tp: tp, shutdown: tp.Shutdown}, nil
 }
 
@@ -93,16 +106,16 @@ func newOTLPExporter(endpoint string) func(context.Context) (sdktrace.SpanExport
 	}
 }
 
-// newOTLPGRPCExporter creates an OTLP/gRPC exporter for the given endpoint.
-func newOTLPGRPCExporter(endpoint string) func(context.Context) (sdktrace.SpanExporter, error) {
-	return func(ctx context.Context) (sdktrace.SpanExporter, error) {
-		conn, err := grpc.NewClient(
-			endpointHost(endpoint),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
-		if err != nil {
-			return nil, err
-		}
-		return otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
+func newOTLPGRPCExporterWithOpts(ctx context.Context, endpoint string, useInsecure bool) (sdktrace.SpanExporter, error) {
+	var creds credentials.TransportCredentials
+	if useInsecure {
+		creds = insecure.NewCredentials()
+	} else {
+		creds = credentials.NewClientTLSFromCert(nil, "")
 	}
+	conn, err := grpc.NewClient(endpointHost(endpoint), grpc.WithTransportCredentials(creds))
+	if err != nil {
+		return nil, err
+	}
+	return otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
 }
