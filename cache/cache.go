@@ -20,10 +20,12 @@ package cache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"sync"
 	"time"
 
+	mkerrors "github.com/pemako/mk/errors"
 	"github.com/pemako/mk/logger"
 	"github.com/redis/go-redis/v9"
 )
@@ -52,6 +54,10 @@ var (
 	registry   = map[string]Cache{}
 	registryMu sync.RWMutex
 )
+
+// ErrAlreadyRegistered is returned by Init when any of the configured backend
+// names already exist in the global registry.
+var ErrAlreadyRegistered = mkerrors.Define(409, "CACHE_ALREADY_REGISTERED", "cache backend already registered")
 
 // Init initializes all configured cache backends and registers them.
 // Returns error if any Redis backend fails to connect.
@@ -82,6 +88,15 @@ func Init(opts ...Option) error {
 	}
 
 	registryMu.Lock()
+	for name := range built {
+		if _, ok := registry[name]; ok {
+			registryMu.Unlock()
+			for _, bc := range built {
+				bc.Close() //nolint:errcheck
+			}
+			return ErrAlreadyRegistered
+		}
+	}
 	maps.Copy(registry, built)
 	registryMu.Unlock()
 	return nil
@@ -134,4 +149,38 @@ func CloseAll() error {
 		delete(registry, name)
 	}
 	return first
+}
+
+// Replace builds a new cache backend for name and replaces any existing entry,
+// closing the old backend first.
+// NOTE: This PR-1 implementation duplicates construction logic from Init() as a
+// temporary measure. PR-2 will replace this with Replace(name string, m *Manager).
+func Replace(name string, opts ...Option) error {
+	o := &options{logger: logger.Default()}
+	for _, opt := range opts {
+		opt(o)
+	}
+	if len(o.backends) == 0 {
+		return fmt.Errorf("cache: Replace requires at least one backend option")
+	}
+	e := o.backends[0]
+	var c Cache
+	var err error
+	switch e.backend {
+	case "redis":
+		c, err = newRedisCache(e.name, e.addr, e.password, e.db, o.logger)
+		if err != nil {
+			return err
+		}
+	default:
+		c = newMemoryCache()
+	}
+	registryMu.Lock()
+	old := registry[name]
+	registry[name] = c
+	registryMu.Unlock()
+	if old != nil {
+		old.Close() //nolint:errcheck
+	}
+	return nil
 }
