@@ -110,8 +110,12 @@ func Is(err, target error) bool { return stderrors.Is(err, target) }
 var (
 	// ErrBadRequest indicates HTTP 400: the request was malformed or failed validation.
 	ErrBadRequest = Define(400, "BAD_REQUEST", "invalid request")
-	// ErrUnAuth indicates HTTP 401: the caller is not authenticated.
-	ErrUnAuth = Define(401, "UNAUTHORIZED", "please login")
+	// ErrUnauthorized indicates HTTP 401: the caller is not authenticated.
+	ErrUnauthorized = Define(401, "UNAUTHORIZED", "please login")
+	// ErrUnAuth is a deprecated alias for ErrUnauthorized. Use ErrUnauthorized in new code.
+	//
+	// Deprecated: use ErrUnauthorized.
+	ErrUnAuth = ErrUnauthorized
 	// ErrForbidden indicates HTTP 403: the caller is authenticated but lacks permission.
 	ErrForbidden = Define(403, "FORBIDDEN", "permission denied")
 	// ErrNotFound indicates HTTP 404: the requested resource does not exist.

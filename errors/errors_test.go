@@ -62,3 +62,14 @@ func TestSentinelVars(t *testing.T) {
 	assert.Equal(t, 429, errors.ErrTooMany.Code)
 	assert.Equal(t, 500, errors.ErrInternal.Code)
 }
+
+func TestErrUnauthorized_IsCompatibleWithErrUnAuth(t *testing.T) {
+	// ErrUnauthorized is the canonical name; ErrUnAuth is the deprecated alias.
+	// Both carry reason "UNAUTHORIZED" so errors.Is matches across them.
+	assert.True(t, errors.Is(errors.ErrUnauthorized, errors.ErrUnAuth),
+		"ErrUnauthorized should match ErrUnAuth via reason")
+	assert.True(t, errors.Is(errors.ErrUnAuth, errors.ErrUnauthorized),
+		"ErrUnAuth should match ErrUnauthorized via reason")
+	assert.Equal(t, errors.ErrUnAuth.Reason, errors.ErrUnauthorized.Reason)
+	assert.Equal(t, 401, errors.Code(errors.ErrUnauthorized))
+}
