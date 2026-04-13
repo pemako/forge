@@ -1,5 +1,5 @@
 app:
-  name: example-service
+  name: full-example-service
   version: v0.1.0
   env: development
 
@@ -44,7 +44,7 @@ auth:
   expire: 24h
 
 tracing:
-  endpoint: "otel-sdk-in.domob-inc.com:14317"
+  endpoint: "localhost:4317"
   sampler: 1.0
 
 metric:

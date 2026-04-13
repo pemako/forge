@@ -12,8 +12,8 @@ import (
 	"github.com/pemako/mk/pagination"
 	"github.com/pemako/mk/validate"
 
-	"github.com/pemako/mk/example/internal/model"
-	"github.com/pemako/mk/example/internal/service"
+	"github.com/pemako/mk/example/full/internal/model"
+	"github.com/pemako/mk/example/full/internal/service"
 )
 
 // UserHandler exposes HTTP endpoints for the user domain.

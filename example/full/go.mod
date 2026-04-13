@@ -1,4 +1,4 @@
-module github.com/pemako/mk/example
+module github.com/pemako/mk/example/full
 
 go 1.26
 
@@ -135,4 +135,4 @@ require (
 	gorm.io/driver/sqlite v1.6.0 // indirect
 )
 
-replace github.com/pemako/mk => ../
+replace github.com/pemako/mk => ../../

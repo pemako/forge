@@ -16,8 +16,8 @@ import (
 	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/metric"
 
-	"github.com/pemako/mk/example/internal/model"
-	"github.com/pemako/mk/example/internal/repository"
+	"github.com/pemako/mk/example/full/internal/model"
+	"github.com/pemako/mk/example/full/internal/repository"
 )
 
 var (

@@ -17,22 +17,28 @@ import (
 	"github.com/pemako/mk/core"
 	"github.com/pemako/mk/cron"
 	"github.com/pemako/mk/database"
+	"github.com/pemako/mk/errors"
 	"github.com/pemako/mk/event"
-	httphandler "github.com/pemako/mk/example/internal/handler/http"
-	"github.com/pemako/mk/example/internal/model"
-	"github.com/pemako/mk/example/internal/service"
+	httphandler "github.com/pemako/mk/example/full/internal/handler/http"
+	"github.com/pemako/mk/example/full/internal/model"
+	"github.com/pemako/mk/example/full/internal/service"
 	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/logger"
 	"github.com/pemako/mk/metric"
 	"github.com/pemako/mk/notify"
+	"github.com/pemako/mk/pprof"
 	grpcserver "github.com/pemako/mk/server/grpc"
 	httpserver "github.com/pemako/mk/server/http"
 	"github.com/pemako/mk/storage"
 	"github.com/pemako/mk/stream"
 	"github.com/pemako/mk/tracing"
+)
 
-	"github.com/pemako/mk/pprof"
+var (
+	storageNotConfiguredErr = errors.Define(503, "STORAGE_NOT_CONFIGURED", "storage not configured")
+	uploadErr               = errors.Define(500, "UPLOAD_FAILED", "upload failed")
+	tokenGenErr             = errors.Define(500, "TOKEN_GEN_FAILED", "token generation failed")
 )
 
 func main() {
@@ -55,19 +61,25 @@ func main() {
 	logger.SetDefault(log)
 
 	// ── Tracing ───────────────────────────────────────────────────────────
-	provider, err := tracing.New(tracing.WithConfig(cfg), tracing.WithLogger(log))
+	// tracing.Provider implements app.Lifecycle (Init is a no-op; Shutdown
+	// flushes pending spans). Pass it to app.WithLifecycle for automatic teardown.
+	tracingProvider, err := tracing.New(tracing.WithConfig(cfg), tracing.WithLogger(log))
 	if err != nil {
 		log.Error(context.Background(), "tracing init failed", logger.F("err", err))
 		os.Exit(1)
 	}
 
 	// ── Metrics ───────────────────────────────────────────────────────────
-	if err := metric.Init(metric.WithConfig(cfg)); err != nil {
+	// metric.Provider implements app.Lifecycle (Init starts exporters; Shutdown
+	// flushes them). Pass it to app.WithLifecycle for automatic init and teardown.
+	metricProvider, err := metric.New(metric.WithConfig(cfg))
+	if err != nil {
 		log.Error(context.Background(), "metric init failed", logger.F("err", err))
 		os.Exit(1)
 	}
 
 	// ── Cache (memory default + Redis shared backend) ─────────────────────
+	// cache.Manager implements app.Closer (Close calls CloseAll).
 	cacheMgr, err := cache.New(cache.WithConfig(cfg), cache.WithLogger(log))
 	if err != nil {
 		log.Error(context.Background(), "cache init failed", logger.F("err", err))
@@ -148,7 +160,7 @@ func main() {
 
 		// Work queue: only one instance processes each order event
 		streamBus.Subscribe("order.created",
-			stream.WithGroup("example-service"),
+			stream.WithGroup("full-service"),
 			stream.WithRetries(3),
 			stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
 				log.Info(ctx, "stream: processing order event", logger.F("id", msg.ID))
@@ -251,7 +263,7 @@ func main() {
 		if notifier != nil {
 			_ = notifier.Send(c.Request.Context(), notify.Message{
 				Subject:  "Test notification",
-				Body:     "Test notification from example service",
+				Body:     "Test notification from full example service",
 				Channels: []notify.Channel{notify.DingTalk},
 			})
 		}
@@ -262,7 +274,7 @@ func main() {
 	r.POST("/api/v1/demo/upload", func(c *gin.Context) {
 		s := storage.Get("default")
 		if s == nil {
-			c.JSON(503, gin.H{"error": "storage not configured"})
+			c.Error(storageNotConfiguredErr) //nolint:errcheck
 			return
 		}
 		url, err := s.Upload(c.Request.Context(), "demo/test.txt",
@@ -270,7 +282,7 @@ func main() {
 			storage.WithContentType("text/plain"),
 		)
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			c.Error(uploadErr) //nolint:errcheck
 			return
 		}
 		c.JSON(200, gin.H{"url": url})
@@ -286,7 +298,7 @@ func main() {
 			Role:   "admin",
 		}, auth.WithConfig(cfg))
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			c.Error(tokenGenErr) //nolint:errcheck
 			return
 		}
 		c.JSON(200, gin.H{"token": token})
@@ -318,6 +330,13 @@ func main() {
 		app.WithServer(servers...),
 		app.WithLogger(log),
 		app.WithMigration(dbMgr),
+		// tracing.Provider and metric.Provider implement app.Lifecycle:
+		//   Init() is called before BeforeStart hooks; Shutdown() is called after
+		//   servers stop, in reverse registration order.
+		app.WithLifecycle(tracingProvider, metricProvider),
+		// cache.Manager implements app.Closer: Close() is called after all
+		// Lifecycle.Shutdown() calls have completed.
+		app.WithCloser(cacheMgr),
 		app.WithBeforeStart(func(ctx context.Context) error {
 			httpSrv.SetReady(true)
 			log.Info(ctx, "service ready",
@@ -326,13 +345,6 @@ func main() {
 				logger.F("metrics", cfg.GetString("metric.prometheus_addr")),
 			)
 			return nil
-		}),
-		app.WithAfterStop(func(ctx context.Context) error {
-			cache.CloseAll() //nolint:errcheck
-			if err := metric.Shutdown(ctx); err != nil {
-				return err
-			}
-			return provider.Shutdown(ctx)
 		}),
 	).Run(); err != nil {
 		logger.Error(context.Background(), "service exit", logger.F("err", err))

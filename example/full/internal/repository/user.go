@@ -6,7 +6,7 @@ import (
 	"github.com/pemako/mk/database"
 	"gorm.io/gorm"
 
-	"github.com/pemako/mk/example/internal/model"
+	"github.com/pemako/mk/example/full/internal/model"
 )
 
 type UserRepo struct{}
