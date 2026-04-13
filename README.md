@@ -31,21 +31,21 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design guide.
 
 | Package           | Description                                                                                                                |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `core`            | Shared interfaces: `Logger`, `Config`, `Server`, `Provider`                                                                |
+| `core`            | Shared interfaces: `Logger`, `Config`, `Server`, `Provider`, `HealthChecker`                                               |
 | `errors`          | Structured `CodedError` with HTTP code, machine-readable reason, and cause chaining                                        |
-| `app`             | Lifecycle runner: Lifecycle.Init → BeforeStart → concurrent servers → Stop → Lifecycle.Shutdown → Closer.Close → AfterStop |
+| `app`             | Lifecycle runner: Lifecycle.Init → BeforeStart → concurrent servers → Stop → Lifecycle.Shutdown → Closer.Close → AfterStop; `WithHealthCheck` / `HealthCheckers()` |
 | `config`          | Viper-backed config loader with file, env-var, and hot-reload support                                                      |
 | `logger`          | Zap-backed structured logger with trace injection, field masking, and level-split file output                              |
 | `tracing`         | OpenTelemetry OTLP trace provider; implements `app.Lifecycle`; no-op when endpoint is unset                                |
 | `metric`          | OTel metrics with Prometheus and OTLP exporters; implements `app.Lifecycle`; automatic HTTP/gRPC instrumentation           |
-| `server/http`     | Gin HTTP server; default middleware stack pre-mounted; `/healthz`, `/readyz`, `/health` auto-registered                    |
+| `server/http`     | Gin HTTP server; default middleware stack pre-mounted; `/healthz`, `/readyz`, `/health` auto-registered; `WithHealthChecks` / `AddReadyCheck` for /readyz integration |
 | `server/grpc`     | gRPC server with interceptor chain, health check service, and optional TLS/mTLS                                            |
 | `middleware/http` | RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler, CORS, RateLimit, IPFilter, BodyLimit, Timeout                 |
 | `middleware/grpc` | UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler, UnaryRateLimit, UnaryIPFilter, UnaryTimeout   |
-| `database`        | GORM connection manager for MySQL, Postgres, SQLite; SQL tracing; goose migrations; `*Manager` implements `app.Migrator`   |
-| `cache`           | `Cache` interface; `Manager` holds named backends (memory/Redis); `Manager` implements `app.Closer`                        |
-| `httpclient`      | Outbound HTTP with OTel tracing, exponential-backoff retry, and named registry                                             |
-| `grpcclient`      | Outbound gRPC with OTel tracing, per-call retry, named registry; `Registry` implements `app.Closer`                        |
+| `database`        | GORM connection manager for MySQL, Postgres, SQLite; SQL tracing; goose migrations; `*Manager` implements `app.Migrator`; `CloseAll() error`; `Manager.HealthChecker(connName)` |
+| `cache`           | `Cache` interface; `Manager` holds named backends (memory/Redis); `Manager` implements `app.Closer`; `Manager.HealthChecker(backendName)` |
+| `httpclient`      | Outbound HTTP with OTel tracing, exponential-backoff retry, and named registry; `Register(name, *Client)` / `Replace` / `CloseAll() error` |
+| `grpcclient`      | Outbound gRPC with OTel tracing, per-call retry, named registry; `Register(name, *ClientConn)` / `Replace`; `Registry` implements `app.Closer` |
 | `lock`            | Redis distributed lock; atomic Lua acquire/release; optional auto-renew and wait-with-timeout                              |
 | `cron`            | Cron scheduler (`core.Server`); per-job retry, timeout, skip-if-running, sub-second tickers                                |
 | `event`           | In-process pub/sub `Bus`; synchronous default, optional async; no package-level state                                      |
@@ -54,10 +54,10 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design guide.
 | `validate`        | go-playground/validator binding; structured 400 errors with field-level metadata                                           |
 | `pagination`      | Page-number `Params` and typed `Result[T]` envelope for list endpoints                                                     |
 | `circuitbreaker`  | Circuit breaker (Closed → Open → HalfOpen); `Execute(ctx, fn)`                                                             |
-| `storage`         | Unified object storage interface for AWS S3, Alibaba OSS, and Tencent COS                                                  |
+| `storage`         | Unified object storage interface for AWS S3, Alibaba OSS, and Tencent COS; `Register(name, Storage)` / `Replace` / `CloseAll() error` |
 | `notify`          | Multi-channel notifications: Email (SMTP), SMS (Aliyun), DingTalk, WeCom, Feishu                                           |
 | `pprof`           | pprof endpoints; standalone `core.Server` or mounted on an existing gin.Engine                                             |
-| `idgen`           | Snowflake ID generator + ULID; `New()` → `Register("name", gen)` → `Get("name").Next()`                                    |
+| `idgen`           | Snowflake ID generator + ULID; `New()` → `Register("name", gen)` → `Get("name").Next()`; `CloseAll() error` (no-op, clears registry) |
 | `ratelimit`       | `Limiter` interface; in-process token-bucket or Redis fixed-window; backs HTTP/gRPC middleware                             |
 | `testutil`        | Test helpers: `FreePort`, `NewConfig` (stub `core.Config`), `NewLogger` (writes to `t.Log`)                                |
 
@@ -191,12 +191,13 @@ Environment variables override any YAML key. With `WithEnv("APP")`, the variable
 
 Shared interfaces that prevent import cycles across packages.
 
-| Interface  | Description                                                           |
-| ---------- | --------------------------------------------------------------------- |
-| `Logger`   | `Debug/Info/Warn/Error(ctx, msg, ...Field)` + `With(...Field) Logger` |
-| `Config`   | `Get*`, `Scan`, `Watch`                                               |
-| `Server`   | `Start(ctx) error`, `Stop(ctx) error`                                 |
-| `Provider` | `Tracer(name) trace.Tracer`, `Shutdown(ctx) error`                    |
+| Interface       | Description                                                           |
+| --------------- | --------------------------------------------------------------------- |
+| `Logger`        | `Debug/Info/Warn/Error(ctx, msg, ...Field)` + `With(...Field) Logger` |
+| `Config`        | `Get*`, `Scan`, `Watch`                                               |
+| `Server`        | `Start(ctx) error`, `Stop(ctx) error`                                 |
+| `Provider`      | `Tracer(name) trace.Tracer`, `Shutdown(ctx) error`                    |
+| `HealthChecker` | `Name() string`, `Check(ctx context.Context) error`                   |
 
 `core.Field` is `{Key string, Value any}`. Use `logger.F(key, value)` as shorthand.
 
@@ -289,6 +290,10 @@ app.New(
     app.WithMigration(dbManager),       // Up() called before Lifecycle.Init
     app.WithLifecycle(tracingProvider, metricProvider), // Init before servers, Shutdown after (reverse)
     app.WithCloser(cacheManager, grpcclient.NewRegistry()), // Close after Lifecycle.Shutdown
+    app.WithHealthCheck(                // register health checkers for centralized access
+        dbMgr.HealthChecker("default"),
+        cacheMgr.HealthChecker("redis"),
+    ),
     app.WithBeforeStart(func(ctx) error { httpSrv.SetReady(true); return nil }),
     app.WithAfterStop(func(ctx) error { return nil }),
     app.WithShutdownTimeout(30 * time.Second),
@@ -345,6 +350,10 @@ srv, _ := httpserver.New(
     httpserver.WithConfig(cfg),
     httpserver.WithLogger(log),
     httpserver.WithAddr(":8080"),          // or WithListener(ln) for :0 random port
+    httpserver.WithHealthChecks(           // probe external deps in /readyz
+        dbMgr.HealthChecker("default"),    // SELECT 1
+        cacheMgr.HealthChecker("redis"),   // PING
+    ),
     httpserver.WithReadyCheck("db", func(ctx context.Context) error {
         return database.DB("default").WithContext(ctx).Exec("SELECT 1").Error
     }),
@@ -353,6 +362,9 @@ r := srv.Engine()                          // access underlying *gin.Engine for 
 r.GET("/users", handler.ListUsers)
 
 srv.SetReady(true)                         // call in app.WithBeforeStart; affects /readyz
+
+// Add more ready checks after construction (e.g. in BeforeStart)
+srv.AddReadyCheck("cache", cacheMgr.HealthChecker("redis").Check)
 ```
 
 Auto-registered endpoints: `/healthz`, `/readyz`, `/health`
@@ -418,6 +430,10 @@ db := database.DB("default")
 
 // Migrations — mgr implements app.Migrator
 app.WithMigration(mgr)
+
+// Health check for /readyz integration
+hc := mgr.HealthChecker("default")   // probes SELECT 1 on the named connection
+httpSrv.AddReadyCheck(hc.Name(), hc.Check)
 ```
 
 ---
@@ -447,6 +463,10 @@ app.WithCloser(mgr)
 c.Set(ctx, "key", "value", time.Hour)
 v, _ := c.Get(ctx, "key")
 c.Del(ctx, "key")
+
+// Health check for /readyz integration
+hc := mgr.HealthChecker("redis")   // probes PING; memory backend is always healthy
+httpSrv.AddReadyCheck(hc.Name(), hc.Check)
 ```
 
 ---
@@ -454,14 +474,21 @@ c.Del(ctx, "key")
 ### `httpclient`
 
 ```go
-// Create
-httpclient.Register("payments", httpclient.WithBaseURL("https://api.payments.io"))
+// Create instance first, then register
+client, err := httpclient.New(httpclient.WithBaseURL("https://api.payments.io"))
+httpclient.Register("payments", client)
 // Or: explicitly check for duplicate
-if err := httpclient.Register(...); errors.Is(err, httpclient.ErrAlreadyRegistered) { ... }
+if err := httpclient.Register("payments", client); errors.Is(err, httpclient.ErrAlreadyRegistered) { ... }
+
+// Replace closes the old client and stores the new one
+httpclient.Replace("payments", newClient)
 
 client := httpclient.Get("payments")
 resp, body, err := client.GetJSON(ctx, "/v1/charges/123")
 resp, body, err := client.PostJSON(ctx, "/v1/charges", payload)
+
+// Release all clients on shutdown
+httpclient.CloseAll()
 ```
 
 ---
@@ -469,10 +496,12 @@ resp, body, err := client.PostJSON(ctx, "/v1/charges", payload)
 ### `grpcclient`
 
 ```go
-grpcclient.Register("inventory", "inventory-svc:9090",
+// Dial first, then register
+conn, err := grpcclient.Dial("inventory-svc:9090",
     grpcclient.WithTLS(),
     grpcclient.WithRetry(3),
 )
+grpcclient.Register("inventory", conn)
 conn := grpcclient.Get("inventory")
 svc := pb.NewInventoryClient(conn)
 
@@ -657,13 +686,13 @@ err := cb.Execute(ctx, func(ctx context.Context) error {
 ### `storage`
 
 ```go
-storage.Register("avatars",
-    storage.WithS3(storage.S3Config{
-        Bucket: "my-avatars", Region: "us-east-1",
-        AccessKey: cfg.GetString("storage.access_key"),
-        SecretKey: cfg.GetString("storage.secret_key"),
-    }),
-)
+// Create instance first, then register
+s, err := storage.New(storage.WithS3(storage.S3Config{
+    Bucket: "my-avatars", Region: "us-east-1",
+    AccessKey: cfg.GetString("storage.access_key"),
+    SecretKey: cfg.GetString("storage.secret_key"),
+}))
+storage.Register("avatars", s)
 
 s := storage.Get("avatars")
 err := s.Put(ctx, "user/42/avatar.png", reader, size, "image/png")

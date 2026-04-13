@@ -220,7 +220,8 @@ addr := ln.Addr().String()
 ### Package inventory
 
 ```
-core/            ← interfaces only (Logger, Config, Server, Provider) — zero deps on other mk packages
+core/            ← interfaces only (Logger, Config, Server, Provider, HealthChecker) — zero deps on other mk packages
+                    core.HealthChecker: Name() string / Check(ctx context.Context) error
 errors/          ← CodedError (HTTP code + reason + cause chain), sentinel vars
 config/          ← viper implementation of core.Config
 logger/          ← zap + lumberjack; per-level log files; sensitive field masking
@@ -228,9 +229,12 @@ app/             ← lifecycle manager: Migrator.Up → Lifecycle.Init → Befor
                     → Server.Stop → Lifecycle.Shutdown (reverse) → Closer.Close → AfterStop
                     Options: WithLifecycle(components...) / WithCloser(closers...)
                     Interfaces: Lifecycle{Init,Shutdown}, Closer{Close}, Migrator{Up}
+                    WithHealthCheck(checkers ...core.HealthChecker) / HealthCheckers() []core.HealthChecker
 server/http/     ← gin server implementing core.Server; auto-mounts default middleware stack:
                     RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler
                     Do NOT re-add these middlewares manually — causes duplicate responses
+                    WithHealthChecks(...core.HealthChecker) — registers /readyz probes at construction
+                    AddReadyCheck(name, fn) — add /readyz probe after construction
 server/grpc/     ← gRPC server implementing core.Server; auto-chains interceptors
 middleware/http/ ← RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler
                     + optional: CORS, Timeout, BodyLimit, RateLimit, IPFilter
@@ -239,15 +243,21 @@ middleware/grpc/ ← UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, U
 database/        ← gorm multi-driver (mysql/postgres/sqlite); SQL tracing plugin; goose migrations
                     database.New() → *Manager (no global side effects)
                     database.Register("name", mgr) / database.Get("name") / database.DB("conn")
+                    database.CloseAll() error — closes and releases all registered managers
                     *Manager implements app.Migrator; Manager.Close() releases all connections
+                    Manager.HealthChecker(connName) core.HealthChecker — probes SELECT 1
 cache/           ← Cache interface; Manager holds named backends (memory/Redis)
                     cache.New() → *Manager (no global side effects)
                     cache.Register("name", mgr) / cache.Client("name") / cache.RedisClient("name")
                     *Manager implements app.Closer; Manager.CloseBackend("name") / Manager.CloseAll()
+                    Manager.HealthChecker(backendName) core.HealthChecker — memory: always healthy; redis: PING
 httpclient/      ← outbound HTTP; otelhttp tracing; exponential-backoff retry; named registry
-                    httpclient.Register("name", opts...) / httpclient.Get("name")
+                    client, err := httpclient.New(opts...) — create instance
+                    httpclient.Register("name", client) / httpclient.Replace("name", client) / httpclient.Get("name")
+                    httpclient.CloseAll() error — closes and clears all registered clients
 grpcclient/      ← outbound gRPC; otelgrpc; retry interceptor; named registry; grpc.NewClient
-                    grpcclient.Register("name", target, opts...) / grpcclient.Get("name")
+                    conn, err := grpcclient.Dial(target, opts...) — create connection
+                    grpcclient.Register("name", conn) / grpcclient.Replace("name", conn) / grpcclient.Get("name")
                     grpcclient.NewRegistry() implements app.Closer (calls CloseAll on shutdown)
 lock/            ← Redis distributed lock; Lua atomic acquire/release; optional auto-renew
 cron/            ← robfig/cron scheduler implementing core.Server; WithDistributedLock option
@@ -269,12 +279,15 @@ validate/        ← go-playground/validator; BindJSON/BindForm/BindQuery/BindUR
 pagination/      ← Params, Result[T], FromQuery, Offset, New[T]
 circuitbreaker/  ← three-state circuit breaker (Closed/Open/HalfOpen); Execute(ctx, fn)
 storage/         ← Storage interface; S3 / Alibaba OSS / Tencent COS backends
-                    storage.Register("name", opts...) / storage.Get("name") / storage.Replace(...)
+                    s, err := storage.New(opts...) — create instance
+                    storage.Register("name", s) / storage.Replace("name", s) / storage.Get("name")
+                    storage.CloseAll() error — clears all registered backends
 notify/          ← Email(SMTP) / SMS(Aliyun) / DingTalk / WeCom / Feishu notification channels
 pprof/           ← pprof profiling endpoints; standalone server (core.Server) or Register on gin.Engine
 idgen/           ← Snowflake ID generator + ULID
                     gen, err := idgen.New(idgen.WithWorkerID(n)) — warns if worker_id not set explicitly
                     idgen.Register("name", gen) / idgen.Get("name").Next() / idgen.Get("name").NextString()
+                    idgen.CloseAll() error — no-op (no connections to close), clears registry
                     idgen.ULID() — time-sortable string, no registration needed
                     Production: always set idgen.worker_id in config (IP-derived default is unstable in containers)
 testutil/        ← test helpers: FreePort, NewConfig (stub core.Config), NewLogger (writes to t.Log)
@@ -296,9 +309,11 @@ func WithLogger(l core.Logger) Option    // present on all infrastructure packag
 Register(name string, instance *T) error   // ErrAlreadyRegistered on duplicate
 Replace(name string, instance *T) error    // closes old, stores new
 Get(name string) *T                        // nil if not found
-CloseAll() error                           // close all + clear
+CloseAll() error                           // close all + clear; nil for resource-free packages
 reset()                                    // unexported; _test.go only
 ```
+
+Note: `Register` always accepts a **pre-built instance**, never options. Create with `New()` (or `Dial()` for grpcclient) first, then pass the instance to `Register`.
 
 **core.Server contract** — `Start` must block; `Stop` must be called to unblock it. `app.WithServer` runs each server in a goroutine. `cron.Scheduler`, `stream.Bus.Worker()`, and both network servers implement this interface.
 
@@ -307,6 +322,22 @@ reset()                                    // unexported; _test.go only
 **app.Closer contract** — `Close` is called after all `Lifecycle.Shutdown` calls complete. Implemented by `cache.Manager` and `grpcclient.Registry`.
 
 **Metrics stub + late wiring** — `middleware/http` and `middleware/grpc` expose hook registration functions. These are no-ops until `metric.Provider.Init()` is called, breaking the import cycle between middleware and metric. Wire functions are idempotent via `sync.Once`.
+
+### HealthChecker integration
+
+Infrastructure packages that connect to external services provide a `HealthChecker` factory:
+
+```go
+// database.Manager and cache.Manager implement this pattern:
+hc := dbMgr.HealthChecker("default")     // returns core.HealthChecker; probes SELECT 1
+hc := cacheMgr.HealthChecker("redis")   // returns core.HealthChecker; probes PING (memory always healthy)
+// hc.Name() → "database:default" or "cache:redis"
+```
+
+Wire into `/readyz` via:
+- `httpserver.WithHealthChecks(checkers...)` — at construction time
+- `httpSrv.AddReadyCheck(name, fn)` — after construction (e.g. in BeforeStart)
+- `app.WithHealthCheck(checkers...)` + `myApp.HealthCheckers()` — centralized holding with manual bridging
 
 ### Error handling convention
 

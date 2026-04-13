@@ -7,7 +7,7 @@
 ## 2. Package Layers and Dependency Direction
 
 ```
-core/             ← interfaces only (Logger, Config, Server, Provider); zero deps on other mk packages
+core/             ← interfaces only (Logger, Config, Server, Provider, HealthChecker); zero deps on other mk packages
 errors/           ← CodedError; zero deps on other mk packages
 │
 config/logger/    ← infrastructure leaf; import core/ only
@@ -329,3 +329,46 @@ Never return raw `fmt.Errorf` from public functions — always wrap a sentinel o
 - Network I/O: use in-process fake or `testcontainers` — never skip or mock the real protocol
 - Tests that start a server: use a random port (`":0"`) to avoid conflicts
 - Global state: provide unexported `reset()` in `_test.go`; tests must not leak state to other tests
+
+## 12. HealthChecker Integration
+
+Infrastructure packages that connect to external services provide a `HealthChecker` factory method on their `Manager` type:
+
+```go
+// database.Manager and cache.Manager implement this pattern:
+hc := dbMgr.HealthChecker("default")     // core.HealthChecker; probes SELECT 1
+hc := cacheMgr.HealthChecker("redis")    // core.HealthChecker; probes PING
+// memory backend is always healthy (no network probe)
+
+// hc.Name() returns a stable name like "database:default" or "cache:redis"
+// hc.Check(ctx) returns nil on healthy, non-nil on failure
+```
+
+Wire into `/readyz` via one of three patterns:
+
+```go
+// Pattern A: at construction time (preferred)
+srv, _ := httpserver.New(
+    httpserver.WithHealthChecks(
+        dbMgr.HealthChecker("default"),
+        cacheMgr.HealthChecker("redis"),
+    ),
+)
+
+// Pattern B: after construction in BeforeStart
+app.WithBeforeStart(func(ctx context.Context) error {
+    httpSrv.AddReadyCheck("db", dbMgr.HealthChecker("default").Check)
+    return nil
+})
+
+// Pattern C: centralized via app, bridged manually
+myApp := app.New(app.WithHealthCheck(dbMgr.HealthChecker("default"), cacheMgr.HealthChecker("redis")))
+app.WithBeforeStart(func(ctx context.Context) error {
+    for _, hc := range myApp.HealthCheckers() {
+        httpSrv.AddReadyCheck(hc.Name(), hc.Check)
+    }
+    return nil
+})
+```
+
+`core.HealthChecker` is defined in `core/` to avoid import cycles — infrastructure packages implement it without importing `server/http` or `app`.

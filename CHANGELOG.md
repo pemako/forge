@@ -10,6 +10,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.3.0] - 2026-04-13
+
+### Breaking Changes
+
+#### All registry packages — `Register`/`Replace` now accept pre-built instances
+
+All registry packages now require a pre-built instance, not options:
+
+| Package | Before | After |
+|---------|--------|-------|
+| `httpclient` | `Register("x", WithBaseURL(...))` | `c, _ := New(WithBaseURL(...)); Register("x", c)` |
+| `storage` | `Register("x", WithS3(...))` | `s, _ := New(WithS3(...)); Register("x", s)` |
+| `grpcclient` | `Register("x", "host:port", opts...)` | `conn, _ := Dial("host:port", opts...); Register("x", conn)` |
+
+`database`, `cache`, and `idgen` already accepted instances — no change for them.
+
+#### `httpclient.CloseAll()` now returns `error`
+
+```go
+// Before: func CloseAll()
+// After:  func CloseAll() error  (always returns nil; consistent with other packages)
+```
+
+### Added
+
+#### `core.HealthChecker` interface
+
+```go
+type HealthChecker interface {
+    Name() string
+    Check(ctx context.Context) error
+}
+```
+
+#### `server/http` — `WithHealthChecks` and `AddReadyCheck`
+
+```go
+httpserver.New(httpserver.WithHealthChecks(
+    dbMgr.HealthChecker("default"),    // probes SELECT 1
+    cacheMgr.HealthChecker("redis"),   // probes PING
+))
+// Or after construction:
+httpSrv.AddReadyCheck("cache", cacheMgr.HealthChecker("redis").Check)
+```
+
+#### `app` — `WithHealthCheck` and `HealthCheckers()`
+
+```go
+myApp := app.New(app.WithHealthCheck(dbMgr.HealthChecker("default")))
+// myApp.HealthCheckers() returns []core.HealthChecker for manual bridging in BeforeStart
+```
+
+#### `database.Manager.HealthChecker(connName)` and `cache.Manager.HealthChecker(backendName)`
+
+Return `core.HealthChecker` for `/readyz` integration. Memory backend is always healthy; Redis backend issues PING.
+
+#### `database.CloseAll() error` and `idgen.CloseAll() error`
+
+Complete the base registry contract for all packages. `idgen.CloseAll()` is a no-op (no connections to close) and always returns nil.
+
+### Changed
+
+#### godoc: primary vs convenience paths documented
+
+Each infrastructure package now has explicit "Instance-first (recommended)" and "Convenience (small services)" sections in its package doc.
+
+#### `metric` helpers documented as facade
+
+`Count`/`Gauge`/`StartTimer` are now explicitly documented as facades over the default `Provider`.
+
+#### `logger.Default()` documented as bootstrap convenience
+
+`logger.Default()` / `logger.SetDefault()` are documented as bootstrap helpers; constructor injection is preferred in production.
+
+---
+
 ## [0.2.0] - 2026-04-13
 
 This release is a **breaking refactor** moving the library from a convenience-first, global-state-heavy design to an instance-first, lifecycle-governed architecture. There are no external users at the time of this release.
@@ -226,6 +302,7 @@ Both are separate Go modules with `replace github.com/pemako/mk => ../../`.
 
 ---
 
-[Unreleased]: https://github.com/pemako/mk/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/pemako/mk/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pemako/mk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pemako/mk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pemako/mk/releases/tag/v0.1.0
