@@ -4,10 +4,8 @@ import (
 	"context"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/jaeger" //nolint:staticcheck
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/exporters/zipkin" //nolint:staticcheck
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
@@ -18,16 +16,16 @@ import (
 )
 
 // Provider wraps an OpenTelemetry TracerProvider and implements core.Provider.
-// Supports zero or more exporters simultaneously. When no exporter is configured,
-// it uses a no-op provider so code runs without a collector.
+// When no exporter is configured a no-op provider is used so code runs
+// without a collector in development or test environments.
 type Provider struct {
 	tp       trace.TracerProvider
 	shutdown func(context.Context) error
 }
 
-// New creates a Provider. If no exporters are configured (no WithOTLP / WithJaeger /
-// WithZipkin / WithExporter / WithEndpoint calls), a no-op provider is returned
-// and no network connections are made.
+// New creates a Provider with the given options.
+// If no exporters are configured (no WithOTLP / WithOTLPGRPC / WithExporter
+// calls), a no-op provider is returned and no network connections are made.
 // Defaults: serviceName="service", sampler=1.0.
 func New(opts ...Option) (*Provider, error) {
 	o := options{
@@ -85,8 +83,7 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 	return p.shutdown(ctx)
 }
 
-// --- exporter constructors (package-private, called by options.go) ---
-
+// newOTLPExporter creates an OTLP/HTTP exporter for the given endpoint.
 func newOTLPExporter(endpoint string) func(context.Context) (sdktrace.SpanExporter, error) {
 	return func(ctx context.Context) (sdktrace.SpanExporter, error) {
 		return otlptracehttp.New(ctx,
@@ -96,8 +93,7 @@ func newOTLPExporter(endpoint string) func(context.Context) (sdktrace.SpanExport
 	}
 }
 
-// newOTLPGRPCExporter creates an OTLP gRPC exporter.
-// Use this when the collector listens on the gRPC port (4317 / 14317).
+// newOTLPGRPCExporter creates an OTLP/gRPC exporter for the given endpoint.
 func newOTLPGRPCExporter(endpoint string) func(context.Context) (sdktrace.SpanExporter, error) {
 	return func(ctx context.Context) (sdktrace.SpanExporter, error) {
 		conn, err := grpc.NewClient(
@@ -108,19 +104,5 @@ func newOTLPGRPCExporter(endpoint string) func(context.Context) (sdktrace.SpanEx
 			return nil, err
 		}
 		return otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
-	}
-}
-
-func newJaegerExporter(endpoint string) func(context.Context) (sdktrace.SpanExporter, error) {
-	return func(_ context.Context) (sdktrace.SpanExporter, error) {
-		return jaeger.New( //nolint:staticcheck
-			jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(endpoint)), //nolint:staticcheck
-		)
-	}
-}
-
-func newZipkinExporter(endpoint string) func(context.Context) (sdktrace.SpanExporter, error) {
-	return func(_ context.Context) (sdktrace.SpanExporter, error) {
-		return zipkin.New(endpoint) //nolint:staticcheck
 	}
 }

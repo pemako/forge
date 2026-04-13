@@ -69,18 +69,9 @@ func TestNew_withEndpointAlias_noConnection(t *testing.T) {
 func TestNew_multipleExporters(t *testing.T) {
 	// Both exporters unreachable — New should succeed, Shutdown should not hang.
 	p, err := tracing.New(
-		tracing.WithOTLP("localhost:14317"),
-		tracing.WithZipkin("http://localhost:9411/api/v2/spans"),
+		tracing.WithOTLP("localhost:14318"),
+		tracing.WithOTLPGRPC("localhost:14317"),
 	)
-	require.NoError(t, err)
-	assert.NotNil(t, p)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_ = p.Shutdown(ctx)
-}
-
-func TestNew_withJaeger_noConnection(t *testing.T) {
-	p, err := tracing.New(tracing.WithJaeger("http://localhost:14268/api/traces"))
 	require.NoError(t, err)
 	assert.NotNil(t, p)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
