@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/jaeger"  //nolint:staticcheck
+	"go.opentelemetry.io/otel/exporters/jaeger" //nolint:staticcheck
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/exporters/zipkin"  //nolint:staticcheck
+	"go.opentelemetry.io/otel/exporters/zipkin" //nolint:staticcheck
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"

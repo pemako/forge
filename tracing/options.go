@@ -35,7 +35,6 @@ import (
 type options struct {
 	serviceName string
 	sampler     float64
-	exporters   []sdktrace.SpanExporter // built lazily in New
 	exporterFns []func(ctx context.Context) (sdktrace.SpanExporter, error)
 }
 
