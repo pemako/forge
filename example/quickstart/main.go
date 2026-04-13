@@ -12,7 +12,6 @@ import (
 	"github.com/pemako/mk/config"
 	"github.com/pemako/mk/errors"
 	"github.com/pemako/mk/logger"
-	mw "github.com/pemako/mk/middleware/http"
 	httpserver "github.com/pemako/mk/server/http"
 )
 
@@ -37,6 +36,8 @@ func main() {
 	}
 	log.Info(context.Background(), "quickstart listening", logger.F("addr", ln.Addr().String()))
 
+	// httpserver.New already mounts: RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler.
+	// Register business routes on srv.Engine() without adding middleware again.
 	srv, err := httpserver.New(
 		httpserver.WithConfig(cfg),
 		httpserver.WithListener(ln),
@@ -48,20 +49,14 @@ func main() {
 	}
 
 	r := srv.Engine()
-	r.Use(
-		mw.RequestID(),
-		mw.Logger(log),
-		mw.Recovery(),
-		mw.ErrorHandler(),
-	)
 
 	r.GET("/hello", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "hello"})
 	})
 
 	r.GET("/error-demo", func(c *gin.Context) {
-		// Correct pattern: use c.Error with a CodedError; ErrorHandler middleware
-		// converts it to the appropriate HTTP status and JSON body.
+		// Use c.Error with a CodedError; ErrorHandler middleware (already in the
+		// default stack) converts it to the appropriate HTTP status and JSON body.
 		c.Error(errors.Define(400, "DEMO_ERROR", "demo error")) //nolint:errcheck
 	})
 
