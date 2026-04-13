@@ -11,11 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMemoryCache_setGet(t *testing.T) {
-	err := cache.Init(cache.WithMemory("mem_test"))
+func newMgr(t *testing.T, opts ...cache.Option) *cache.Manager {
+	t.Helper()
+	mgr, err := cache.New(opts...)
 	require.NoError(t, err)
+	return mgr
+}
 
-	c := cache.Client("mem_test")
+func TestMemoryCache_setGet(t *testing.T) {
+	mgr := newMgr(t, cache.WithMemory("mem_test"))
+	c := mgr.Client("mem_test")
 	require.NotNil(t, c)
 
 	ctx := context.Background()
@@ -27,19 +32,15 @@ func TestMemoryCache_setGet(t *testing.T) {
 }
 
 func TestMemoryCache_miss(t *testing.T) {
-	err := cache.Init(cache.WithMemory("mem_miss"))
-	require.NoError(t, err)
-
-	c := cache.Client("mem_miss")
-	_, err = c.Get(context.Background(), "nonexistent")
+	mgr := newMgr(t, cache.WithMemory("mem_miss"))
+	c := mgr.Client("mem_miss")
+	_, err := c.Get(context.Background(), "nonexistent")
 	assert.ErrorIs(t, err, cache.ErrCacheMiss)
 }
 
 func TestMemoryCache_ttl(t *testing.T) {
-	err := cache.Init(cache.WithMemory("mem_ttl"))
-	require.NoError(t, err)
-
-	c := cache.Client("mem_ttl")
+	mgr := newMgr(t, cache.WithMemory("mem_ttl"))
+	c := mgr.Client("mem_ttl")
 	ctx := context.Background()
 	require.NoError(t, c.Set(ctx, "expiring", "val", 30*time.Millisecond))
 
@@ -57,10 +58,8 @@ func TestRedisCache_setGet(t *testing.T) {
 	require.NoError(t, err)
 	defer mr.Close()
 
-	err = cache.Init(cache.WithRedis("redis_test", mr.Addr()))
-	require.NoError(t, err)
-
-	c := cache.Client("redis_test")
+	mgr := newMgr(t, cache.WithRedis("redis_test", mr.Addr()))
+	c := mgr.Client("redis_test")
 	require.NotNil(t, c)
 
 	ctx := context.Background()
@@ -72,22 +71,18 @@ func TestRedisCache_setGet(t *testing.T) {
 }
 
 func TestCache_del(t *testing.T) {
-	err := cache.Init(cache.WithMemory("mem_del"))
-	require.NoError(t, err)
-
-	c := cache.Client("mem_del")
+	mgr := newMgr(t, cache.WithMemory("mem_del"))
+	c := mgr.Client("mem_del")
 	ctx := context.Background()
 	require.NoError(t, c.Set(ctx, "a", "1", 0))
 	require.NoError(t, c.Del(ctx, "a"))
-	_, err = c.Get(ctx, "a")
+	_, err := c.Get(ctx, "a")
 	assert.ErrorIs(t, err, cache.ErrCacheMiss)
 }
 
 func TestCache_exists(t *testing.T) {
-	err := cache.Init(cache.WithMemory("mem_exists"))
-	require.NoError(t, err)
-
-	c := cache.Client("mem_exists")
+	mgr := newMgr(t, cache.WithMemory("mem_exists"))
+	c := mgr.Client("mem_exists")
 	ctx := context.Background()
 	require.NoError(t, c.Set(ctx, "x", "1", 0))
 

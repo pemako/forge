@@ -8,23 +8,50 @@ import (
 
 func reset() {
 	registryMu.Lock()
-	for _, c := range registry {
-		c.Close() //nolint:errcheck
+	for _, m := range registry {
+		m.CloseAll() //nolint:errcheck
 	}
 	clear(registry)
 	registryMu.Unlock()
 }
 
-func TestInit_DuplicateError(t *testing.T) {
+func TestNew_DuplicateError(t *testing.T) {
 	reset()
-	require.NoError(t, Init(WithMemory("mem")))
-	err := Init(WithMemory("mem"))
+	mgr, err := New(WithMemory("mem"))
+	require.NoError(t, err)
+	require.NoError(t, Register("mem", mgr))
+	mgr2, err := New(WithMemory("mem"))
+	require.NoError(t, err)
+	err = Register("mem", mgr2)
 	require.ErrorIs(t, err, ErrAlreadyRegistered)
 }
 
 func TestReplace_ClosesOldBackend(t *testing.T) {
 	reset()
-	require.NoError(t, Init(WithMemory("m")))
-	require.NoError(t, Replace("m", WithMemory("m")))
+	mgr, err := New(WithMemory("m"))
+	require.NoError(t, err)
+	require.NoError(t, Register("default", mgr))
+	mgr2, err := New(WithMemory("m"))
+	require.NoError(t, err)
+	require.NoError(t, Replace("default", mgr2))
 	require.NotNil(t, Client("m"))
+}
+
+func TestNew_ReturnsManager(t *testing.T) {
+	mgr, err := New(WithMemory("default"))
+	require.NoError(t, err)
+	require.NotNil(t, mgr.Client("default"))
+	require.Nil(t, mgr.Client("missing"))
+}
+
+func TestManager_Close_ImplementsCloser(t *testing.T) {
+	mgr, _ := New(WithMemory("m"))
+	require.NoError(t, mgr.Close())
+}
+
+func TestRegister_DelegatesToDefault(t *testing.T) {
+	reset()
+	mgr, _ := New(WithMemory("default"))
+	require.NoError(t, Register("default", mgr))
+	require.NotNil(t, Client("default"))
 }

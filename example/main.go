@@ -68,8 +68,13 @@ func main() {
 	}
 
 	// ── Cache (memory default + Redis shared backend) ─────────────────────
-	if err := cache.Init(cache.WithConfig(cfg), cache.WithLogger(log)); err != nil {
+	cacheMgr, err := cache.New(cache.WithConfig(cfg), cache.WithLogger(log))
+	if err != nil {
 		log.Error(context.Background(), "cache init failed", logger.F("err", err))
+		os.Exit(1)
+	}
+	if err := cache.Register("default", cacheMgr); err != nil {
+		log.Error(context.Background(), "cache register failed", logger.F("err", err))
 		os.Exit(1)
 	}
 

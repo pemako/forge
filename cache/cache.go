@@ -3,16 +3,18 @@
 // external dependencies. The Redis backend is optional and configured via
 // WithRedis or WithConfig.
 //
-// A package-level registry stores named Cache instances. All instances that
-// need Redis share the connection through cache.RedisClient, which is also
-// used by the lock and stream packages.
+// A package-level registry stores named Manager instances. All instances that
+// need Redis share the connection through a Manager's RedisClient method, which
+// is also used by the lock and stream packages.
 //
 // Example:
 //
-//	cache.Init(
+//	mgr, err := cache.New(
 //	    cache.WithMemory("default"),
 //	    cache.WithRedis("redis", "redis:6379"),
 //	)
+//	if err != nil { ... }
+//	cache.Register("default", mgr)
 //	c := cache.Client("default")
 //	c.Set(ctx, "key", "value", time.Hour)
 package cache
@@ -20,8 +22,6 @@ package cache
 import (
 	"context"
 	"errors"
-	"fmt"
-	"maps"
 	"sync"
 	"time"
 
@@ -50,18 +50,19 @@ type Cache interface {
 	Close() error
 }
 
-var (
-	registry   = map[string]Cache{}
-	registryMu sync.RWMutex
-)
-
-// ErrAlreadyRegistered is returned by Init when any of the configured backend
-// names already exist in the global registry.
+// ErrAlreadyRegistered is returned by Register when a Manager with the given
+// name already exists in the global registry.
 var ErrAlreadyRegistered = mkerrors.Define(409, "CACHE_ALREADY_REGISTERED", "cache backend already registered")
 
-// Init initializes all configured cache backends and registers them.
-// Returns error if any Redis backend fails to connect.
-func Init(opts ...Option) error {
+// Manager owns a set of named cache backends and exposes them by name.
+// Use New to create a Manager, then Register to add it to the global registry.
+type Manager struct {
+	backends map[string]Cache
+}
+
+// New builds all configured cache backends and returns a Manager that owns them.
+// Returns an error if any Redis backend fails to connect.
+func New(opts ...Option) (*Manager, error) {
 	o := &options{}
 	for _, opt := range opts {
 		opt(o)
@@ -70,8 +71,7 @@ func Init(opts ...Option) error {
 		o.logger = logger.Default()
 	}
 
-	// Build all backends first, then lock once for registry writes.
-	built := make(map[string]Cache, len(o.backends))
+	backends := make(map[string]Cache, len(o.backends))
 	for _, e := range o.backends {
 		var c Cache
 		var err error
@@ -79,108 +79,137 @@ func Init(opts ...Option) error {
 		case "redis":
 			c, err = newRedisCache(e.name, e.addr, e.password, e.db, o.logger)
 			if err != nil {
-				return err
+				// Close any already-built backends before returning.
+				for _, bc := range backends {
+					bc.Close() //nolint:errcheck
+				}
+				return nil, err
 			}
 		default: // "memory" or empty
 			c = newMemoryCache()
 		}
-		built[e.name] = c
+		backends[e.name] = c
 	}
-
-	registryMu.Lock()
-	for name := range built {
-		if _, ok := registry[name]; ok {
-			registryMu.Unlock()
-			for _, bc := range built {
-				bc.Close() //nolint:errcheck
-			}
-			return ErrAlreadyRegistered
-		}
-	}
-	maps.Copy(registry, built)
-	registryMu.Unlock()
-	return nil
+	return &Manager{backends: backends}, nil
 }
 
-// Client returns the Cache for the named instance, or nil if not registered.
-func Client(name string) Cache {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	return registry[name]
+// Client returns the Cache for the named backend, or nil if not found.
+func (m *Manager) Client(name string) Cache {
+	return m.backends[name]
 }
 
 // RedisClient returns the underlying *redis.Client for the named Redis backend.
-// Returns nil if the backend is not registered or is not a Redis backend
-// (e.g., in-memory backend).
-// Used by packages that need direct access to Redis operations such as
-// stream processing.
-func RedisClient(name string) *redis.Client {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	c := registry[name]
+// Returns nil if the backend is not registered or is not a Redis backend.
+func (m *Manager) RedisClient(name string) *redis.Client {
+	c, ok := m.backends[name]
+	if !ok {
+		return nil
+	}
 	if rc, ok := c.(*redisCache); ok {
 		return rc.client
 	}
 	return nil
 }
 
-// Close closes the named cache backend and removes it from the registry.
-func Close(name string) error {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	c, ok := registry[name]
+// CloseBackend closes the named backend (named to avoid conflict with Close()).
+// The backend is removed from the Manager after closing.
+// Returns nil if the backend does not exist.
+func (m *Manager) CloseBackend(name string) error {
+	c, ok := m.backends[name]
 	if !ok {
 		return nil
 	}
-	delete(registry, name)
+	delete(m.backends, name)
 	return c.Close()
 }
 
-// CloseAll closes all registered cache backends.
+// CloseAll closes every backend in this Manager and clears the internal map.
+func (m *Manager) CloseAll() error {
+	var first error
+	for name, c := range m.backends {
+		if err := c.Close(); err != nil && first == nil {
+			first = err
+		}
+		delete(m.backends, name)
+	}
+	return first
+}
+
+// Close calls CloseAll. It implements app.Closer.
+func (m *Manager) Close() error {
+	return m.CloseAll()
+}
+
+// --- Package-level registry of named *Manager instances ---
+
+var (
+	registry   = map[string]*Manager{}
+	registryMu sync.RWMutex
+)
+
+// Register adds m to the global registry under name.
+// Returns ErrAlreadyRegistered if a Manager with that name already exists.
+func Register(name string, m *Manager) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, ok := registry[name]; ok {
+		return ErrAlreadyRegistered
+	}
+	registry[name] = m
+	return nil
+}
+
+// Replace stores m in the global registry under name, closing and replacing
+// any previously registered Manager.
+func Replace(name string, m *Manager) error {
+	registryMu.Lock()
+	old := registry[name]
+	registry[name] = m
+	registryMu.Unlock()
+	if old != nil {
+		old.CloseAll() //nolint:errcheck
+	}
+	return nil
+}
+
+// Get returns the *Manager registered under name, or nil if not found.
+func Get(name string) *Manager {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	return registry[name]
+}
+
+// Client returns the Cache for the named backend from the "default" Manager.
+// Returns nil if the "default" Manager is not registered or has no such backend.
+func Client(name string) Cache {
+	m := Get("default")
+	if m == nil {
+		return nil
+	}
+	return m.Client(name)
+}
+
+// RedisClient returns the *redis.Client for the named backend from the "default" Manager.
+// Returns nil if the "default" Manager is not registered or has no Redis backend with that name.
+func RedisClient(name string) *redis.Client {
+	m := Get("default")
+	if m == nil {
+		return nil
+	}
+	return m.RedisClient(name)
+}
+
+// CloseAll closes all Managers in the global registry.
 // Call in app.WithAfterStop to release Redis connections on shutdown.
 func CloseAll() error {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	var first error
-	for name, c := range registry {
-		if err := c.Close(); err != nil && first == nil {
+	for name, m := range registry {
+		if err := m.CloseAll(); err != nil && first == nil {
 			first = err
 		}
 		delete(registry, name)
 	}
 	return first
-}
-
-// Replace builds a new cache backend for name and replaces any existing entry,
-// closing the old backend first.
-// NOTE: This PR-1 implementation duplicates construction logic from Init() as a
-// temporary measure. PR-2 will replace this with Replace(name string, m *Manager).
-func Replace(name string, opts ...Option) error {
-	o := &options{logger: logger.Default()}
-	for _, opt := range opts {
-		opt(o)
-	}
-	if len(o.backends) == 0 {
-		return fmt.Errorf("cache: Replace requires at least one backend option")
-	}
-	e := o.backends[0]
-	var c Cache
-	var err error
-	switch e.backend {
-	case "redis":
-		c, err = newRedisCache(e.name, e.addr, e.password, e.db, o.logger)
-		if err != nil {
-			return err
-		}
-	default:
-		c = newMemoryCache()
-	}
-	registryMu.Lock()
-	old := registry[name]
-	registry[name] = c
-	registryMu.Unlock()
-	if old != nil {
-		old.Close() //nolint:errcheck
-	}
-	return nil
 }
