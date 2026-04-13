@@ -128,6 +128,22 @@ func Replace(name string, m *Manager) error {
 	return nil
 }
 
+// CloseAll closes all database connections held by every registered Manager
+// and clears the registry. It collects and returns the first non-nil error
+// encountered while closing.
+func CloseAll() error {
+	registryMu.Lock()
+	var first error
+	for _, m := range registry {
+		if err := m.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	clear(registry)
+	registryMu.Unlock()
+	return first
+}
+
 // Get returns the Manager registered under name, or nil.
 func Get(name string) *Manager {
 	registryMu.RLock()
