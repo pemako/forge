@@ -75,13 +75,14 @@ func TestBus_async(t *testing.T) {
 	assert.Equal(t, int32(3), count.Load())
 }
 
-func TestDefaultBus(t *testing.T) {
-	var got int
-	event.Subscribe("default.test", func(_ context.Context, payload any) error {
-		got = payload.(int)
+func TestBus_Isolation(t *testing.T) {
+	bus1 := event.New()
+	bus2 := event.New()
+	received := false
+	bus1.Subscribe("topic", func(ctx context.Context, p any) error {
+		received = true
 		return nil
 	})
-	defer event.Unsubscribe("default.test")
-	require.NoError(t, event.Publish(context.Background(), "default.test", 42))
-	assert.Equal(t, 42, got)
+	bus2.Publish(context.Background(), "topic", "payload") //nolint:errcheck
+	require.False(t, received)
 }

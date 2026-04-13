@@ -2,10 +2,8 @@
 // Events are identified by a string topic. Handlers receive the payload as any
 // and must type-assert to the expected type.
 //
-// A package-level default bus is available via the top-level Publish, Subscribe,
-// and Unsubscribe functions. For isolated buses (e.g., in tests or multi-tenant
-// scenarios where event namespaces must not bleed across), create a dedicated bus
-// with New.
+// Create a dedicated bus with New for isolated event namespaces (e.g., in tests
+// or multi-tenant scenarios where topics must not bleed across).
 //
 // Delivery is synchronous by default: Publish blocks until all handlers return
 // and returns the first non-nil error. Use WithAsync to deliver events in
@@ -14,21 +12,19 @@
 //
 // Example:
 //
-//	// Register a handler on the default bus.
-//	event.Subscribe("user.registered", func(ctx context.Context, payload any) error {
+//	// Create an explicit bus (recommended — avoids hidden global state).
+//	bus := event.New(event.WithAsync(), event.WithLogger(log))
+//
+//	bus.Subscribe("user.registered", func(ctx context.Context, payload any) error {
 //	    e := payload.(UserRegisteredEvent)
 //	    return mailer.SendWelcome(ctx, e.Email)
 //	})
 //
-//	// Publish an event; blocks until all handlers finish (synchronous default).
-//	err := event.Publish(ctx, "user.registered", UserRegisteredEvent{
+//	// Publish an event; returns immediately (async mode).
+//	err := bus.Publish(ctx, "user.registered", UserRegisteredEvent{
 //	    UserID: 123,
 //	    Email:  "a@b.com",
 //	})
-//
-//	// For an isolated bus with async delivery:
-//	bus := event.New(event.WithAsync())
-//	bus.Subscribe("order.placed", handleOrderPlaced)
 package event
 
 import (
@@ -141,24 +137,4 @@ func (b *Bus) Publish(ctx context.Context, topic string, payload any) error {
 		}
 	}
 	return nil
-}
-
-// --- Package-level default bus ---
-
-// _default is the shared Bus used by the package-level Subscribe, Unsubscribe,
-// and Publish helpers. It uses synchronous delivery and the default logger.
-var _default = New()
-
-// Subscribe registers handler on the default bus for topic.
-// See Bus.Subscribe for full semantics.
-func Subscribe(topic string, handler HandlerFunc) { _default.Subscribe(topic, handler) }
-
-// Unsubscribe removes all handlers for topic on the default bus.
-// See Bus.Unsubscribe for full semantics.
-func Unsubscribe(topic string) { _default.Unsubscribe(topic) }
-
-// Publish delivers payload to all handlers registered for topic on the default bus.
-// See Bus.Publish for full semantics.
-func Publish(ctx context.Context, topic string, payload any) error {
-	return _default.Publish(ctx, topic, payload)
 }
