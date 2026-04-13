@@ -25,8 +25,10 @@ go vet ./...
 # Lint (golangci-lint v1.x required)
 golangci-lint run ./...
 
-# Build and run the example service
-cd example && go build ./... && go run .
+# Build and run the quickstart example
+cd example/quickstart && go build ./... && go run .
+# Build and run the full example
+cd example/full && go build ./... && go run .
 ```
 
 ## After completing any package work
@@ -35,7 +37,7 @@ After finishing any task that adds or modifies a package — before considering 
 
 1. **`CLAUDE.md`** — does the Package inventory list need updating? Are there new patterns, conventions, or cross-package rules introduced by this change?
 2. **`README.md`** — does the Features table or Package Reference section need a new row or updated description?
-3. **`example/`** — does the example service demonstrate the new or changed API? Add or update `example/` code to show the key usage.
+3. **`example/`** — does the example service demonstrate the new or changed API? Add or update `example/full/` code to show the key usage. For significant API changes, also check if `example/quickstart/` needs updating.
 
 If any of the three are stale, update them as part of the same task. Do not wait to be asked.
 
@@ -198,19 +200,19 @@ core/            ← interfaces only (Logger, Config, Server, Provider) — zero
 errors/          ← CodedError (HTTP code + reason + cause chain), sentinel vars
 config/          ← viper implementation of core.Config
 logger/          ← zap + lumberjack; per-level log files; sensitive field masking
-app/             ← lifecycle manager: migrations → BeforeStart → Start → signal → Stop → AfterStop
+app/             ← lifecycle manager: migrations → Lifecycle.Init → BeforeStart → Start → signal → Stop → Lifecycle.Shutdown → Closer.Close; WithLifecycle(components...) / WithCloser(closers...)
 server/http/     ← gin server implementing core.Server; auto-mounts default middleware stack
 server/grpc/     ← gRPC server implementing core.Server; auto-chains interceptors
 middleware/http/ ← RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler + optional CORS/RateLimit/etc.
 middleware/grpc/ ← same set as unary interceptors; Metrics stub wired by metric.Init()
 database/        ← gorm multi-driver (mysql/postgres/sqlite), SQL tracing plugin, goose migrations
-cache/           ← Cache interface; memory (default) or Redis backend; named registry
+cache/           ← Cache interface; Manager type holds named backends; cache.New() returns (*Manager, error); cache.Register("name", mgr) / cache.Client("name"); memory (default) or Redis backend; Manager implements app.Closer
 httpclient/      ← outbound HTTP; otelhttp tracing; exponential-backoff retry; named registry
 grpcclient/      ← outbound gRPC; otelgrpc; retry interceptor; named registry; grpc.NewClient
 lock/            ← Redis distributed lock; Lua atomic acquire/release; optional auto-renew
 cron/            ← robfig/cron scheduler implementing core.Server; WithDistributedLock option
-event/           ← in-process pub/sub; sync (default) or async delivery
-stream/          ← Redis Streams distributed pub/sub; work-queue and broadcast modes
+event/           ← in-process pub/sub; Bus struct only (no package-level functions); event.New() returns *Bus; sync (default) or async delivery
+stream/          ← Redis Streams distributed pub/sub; Bus struct only (no package-level functions); stream.New(redisClient, opts...) returns (*Bus, error); work-queue (WithGroup) and broadcast (WithBroadcast) modes
 tracing/         ← otel OTLP provider implementing core.Provider
 metric/          ← Prometheus + OTLP dual-channel; Count/Gauge/StartTimer helpers
 auth/            ← JWT signing/verification; Required/Optional gin middleware; FromContext[T]
@@ -220,7 +222,7 @@ circuitbreaker/  ← three-state circuit breaker (Closed/Open/HalfOpen); Execute
 storage/         ← Storage interface; S3 / Alibaba OSS / Tencent COS backends
 notify/          ← Email(SMTP) / SMS(Aliyun) / DingTalk / WeCom / Feishu notification channels
 pprof/           ← pprof profiling endpoints; standalone server (core.Server) or Register on existing gin.Engine
-idgen/           ← Snowflake ID generator + ULID; Next()/NextString() for snowflake, ULID() for time-sortable string IDs; named registry
+idgen/           ← Snowflake ID generator + ULID; instance-first: idgen.New() returns (*Generator, error); idgen.Register("name", gen) / idgen.Get("name").Next() for registry usage; ULID() for time-sortable string IDs; auto-derives worker ID from host IP
 testutil/        ← test helpers: FreePort, NewConfig (stub core.Config), NewLogger (writes to t.Log)
 ratelimit/       ← Limiter interface; in-process token-bucket or distributed Redis fixed-window; used by middleware
 ```
@@ -282,7 +284,7 @@ cache:
 
 ```go
 locker := lock.NewWithClient(cache.RedisClient("redis"))
-stream.Init(cache.RedisClient("redis"))
+streamBus, err := stream.New(cache.RedisClient("redis"))
 ```
 
 ### event vs stream
@@ -308,4 +310,8 @@ Defined in `app/options.go` (not in database) to avoid an import cycle. `*databa
 
 ### example service
 
-`example/` is a separate Go module with a `replace` directive pointing at `../`. It demonstrates every mk package. Run `go mod tidy` inside `example/` after adding new dependencies to the parent module.
+`example/` contains two separate Go modules:
+- `example/quickstart/` — minimal HTTP service; demonstrates config, logger, gin routes, and app lifecycle. Replace directive points at `../../`.
+- `example/full/` — full-featured service; demonstrates every mk package. Replace directive points at `../../`.
+
+Run `go mod tidy` inside the relevant subdirectory after adding new dependencies to the parent module.

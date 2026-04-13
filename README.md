@@ -2,6 +2,27 @@
 
 An internal Go component library for building production-grade HTTP and gRPC services. `mk` provides a cohesive set of packages — config, logger, tracing, metrics, database, cache, servers, and middleware — all wired together through a common interface layer and a lifecycle-managing `app` runner.
 
+## Getting Started
+
+**Quick Start** (5 minutes): See [`example/quickstart`](./example/quickstart) for a minimal HTTP service with graceful shutdown.
+
+**Full Example**: See [`example/full`](./example/full) for database, cache, tracing, metrics, stream, cron, auth, and pprof.
+
+## Global vs Instance
+
+This library is **instance-first**. Prefer creating explicit instances:
+
+```go
+// Recommended
+bus, err := stream.New(cache.RedisClient("redis"))
+mgr, err := cache.New(cache.WithMemory("default"))
+cache.Register("default", mgr)
+```
+
+Package-level convenience functions (like `cache.Client("name")`) delegate to the `"default"` registered instance and are suitable for small services. Larger services should inject instances explicitly.
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design guide.
+
 ## Features
 
 | Package | Description |
@@ -75,7 +96,7 @@ func main() {
     logger.SetDefault(log)
 
     provider, _ := tracing.New(tracing.WithConfig(cfg))
-    metric.Init(metric.WithConfig(cfg))
+    metricProv, _ := metric.New(metric.WithConfig(cfg))
 
     httpSrv, _ := httpserver.New(httpserver.WithConfig(cfg), httpserver.WithLogger(log))
     grpcSrv, _ := grpcserver.New(grpcserver.WithConfig(cfg), grpcserver.WithLogger(log))
@@ -88,13 +109,12 @@ func main() {
         app.WithName(cfg.GetString("app.name")),
         app.WithServer(httpSrv, grpcSrv),
         app.WithLogger(log),
+        // Lifecycle: Init() before servers start, Shutdown() after they stop.
+        // tracing.Provider and metric.Provider both implement app.Lifecycle.
+        app.WithLifecycle(provider, metricProv),
         app.WithBeforeStart(func(ctx context.Context) error {
-            httpserver.SetReady(true)
+            httpSrv.SetReady(true)
             return nil
-        }),
-        app.WithAfterStop(func(ctx context.Context) error {
-            metric.Shutdown()
-            return provider.Shutdown(ctx)
         }),
     ).Run(); err != nil {
         logger.Error(context.Background(), "fatal", logger.F("err", err))
