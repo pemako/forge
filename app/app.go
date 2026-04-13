@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -161,12 +162,18 @@ func (a *App) Run() error {
 		a.log(ctx, "app: start goroutines did not exit within shutdown timeout")
 	}
 
-	if runErr == nil {
-		for _, err := range stopErrs {
-			if err != nil {
-				runErr = fmt.Errorf("server stop: %w", err)
-				break
-			}
+	var stopJoined []error
+	for _, err := range stopErrs {
+		if err != nil {
+			stopJoined = append(stopJoined, fmt.Errorf("server stop: %w", err))
+		}
+	}
+	if len(stopJoined) > 0 {
+		joined := errors.Join(stopJoined...)
+		if runErr == nil {
+			runErr = joined
+		} else {
+			runErr = errors.Join(runErr, joined)
 		}
 	}
 

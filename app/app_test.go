@@ -165,6 +165,35 @@ func TestRun_ServerStartError_StopErrorBothCollected(t *testing.T) {
 	require.Contains(t, err.Error(), "start failed")
 }
 
+func TestRun_MultipleStopErrors_AllReturned(t *testing.T) {
+	err1 := fmt.Errorf("stop error A")
+	err2 := fmt.Errorf("stop error B")
+
+	srv1 := &testServer{
+		startFn: func(ctx context.Context) error { return nil },
+		stopFn:  func(ctx context.Context) error { return err1 },
+	}
+	srv2 := &testServer{
+		startFn: func(ctx context.Context) error { return nil },
+		stopFn:  func(ctx context.Context) error { return err2 },
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+	}()
+
+	err := app.New(
+		app.WithServer(srv1, srv2),
+		app.WithShutdownTimeout(time.Second),
+	).Run()
+
+	require.Error(t, err)
+	// Both stop errors should be present in the returned error
+	assert.ErrorIs(t, err, err1)
+	assert.ErrorIs(t, err, err2)
+}
+
 func TestRun_HungServer_ReturnsAfterTimeout(t *testing.T) {
 	// startFn blocks on a channel that is NEVER closed by stopFn.
 	// This simulates a truly hung goroutine (e.g. blocked on I/O).
