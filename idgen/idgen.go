@@ -6,6 +6,7 @@ import (
 
 	"github.com/bwmarrin/snowflake"
 	"github.com/pemako/mk/core"
+	"github.com/pemako/mk/errors"
 	"github.com/pemako/mk/logger"
 )
 
@@ -122,6 +123,10 @@ var (
 	mu        sync.RWMutex
 )
 
+// ErrAlreadyRegistered is returned by Init when a generator with the given
+// name already exists in the global registry.
+var ErrAlreadyRegistered = errors.Define(409, "IDGEN_ALREADY_REGISTERED", "generator already registered")
+
 func getDefault() *Generator {
 	_initOnce.Do(func() {
 		g, err := New()
@@ -145,7 +150,26 @@ func NextString() string { return getDefault().NextString() }
 // Init creates a named Generator and stores it in the global registry.
 // Call Init once at startup for each logical ID namespace that requires a
 // distinct worker ID. Use Get to retrieve the generator later.
+// Returns ErrAlreadyRegistered if a generator with that name already exists.
 func Init(name string, opts ...Option) error {
+	g, err := New(opts...)
+	if err != nil {
+		return err
+	}
+	mu.Lock()
+	if _, ok := registry[name]; ok {
+		mu.Unlock()
+		return ErrAlreadyRegistered
+	}
+	registry[name] = g
+	mu.Unlock()
+	return nil
+}
+
+// Replace creates a named Generator and stores it in the global registry,
+// overwriting any existing entry without error. Generator has no resources
+// to close, so the old instance is simply replaced.
+func Replace(name string, opts ...Option) error {
 	g, err := New(opts...)
 	if err != nil {
 		return err
