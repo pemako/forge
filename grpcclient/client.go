@@ -6,11 +6,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pemako/mk/errors"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// ErrAlreadyRegistered is returned by Register when a connection with the given
+// name already exists in the registry. Use Replace to overwrite an existing entry.
+var ErrAlreadyRegistered = errors.Define(409, "GRPCCLIENT_ALREADY_REGISTERED", "connection already registered")
 
 // Dial creates a new gRPC client connection to target using grpc.NewClient.
 // The connection is lazy — no network activity occurs until the first RPC.
@@ -71,14 +76,37 @@ var (
 
 // Register dials target and stores the resulting connection in the global
 // registry under name, making it retrievable with Get. Returns any dial error.
+// Returns ErrAlreadyRegistered if a connection with that name already exists;
+// use Replace to overwrite an existing entry.
 func Register(name, target string, opts ...Option) error {
 	conn, err := Dial(target, opts...)
 	if err != nil {
 		return err
 	}
 	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, ok := registry[name]; ok {
+		conn.Close() //nolint:errcheck
+		return ErrAlreadyRegistered
+	}
+	registry[name] = conn
+	return nil
+}
+
+// Replace dials target and stores the resulting connection under name,
+// closing any previously registered connection with the same name.
+func Replace(name, target string, opts ...Option) error {
+	conn, err := Dial(target, opts...)
+	if err != nil {
+		return err
+	}
+	registryMu.Lock()
+	old := registry[name]
 	registry[name] = conn
 	registryMu.Unlock()
+	if old != nil {
+		old.Close() //nolint:errcheck
+	}
 	return nil
 }
 
@@ -92,14 +120,19 @@ func Get(name string) *grpc.ClientConn {
 
 // CloseAll closes every connection in the global registry and clears it.
 // Call this in an application shutdown hook (e.g. app.WithAfterStop) to drain
-// in-flight RPCs before the process exits.
-func CloseAll() {
+// in-flight RPCs before the process exits. Returns the first close error
+// encountered, if any; all connections are closed regardless.
+func CloseAll() error {
 	registryMu.Lock()
 	defer registryMu.Unlock()
+	var first error
 	for name, conn := range registry {
-		conn.Close()
+		if err := conn.Close(); err != nil && first == nil {
+			first = err
+		}
 		delete(registry, name)
 	}
+	return first
 }
 
 // Init reads named gRPC connection configs and registers each one.

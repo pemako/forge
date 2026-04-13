@@ -46,7 +46,7 @@ func TestRegistry_RegisterGet(t *testing.T) {
 	addr := startTestServer(t)
 	err := grpcclient.Register("grpc_health_test", addr, grpcclient.WithInsecure())
 	require.NoError(t, err)
-	t.Cleanup(grpcclient.CloseAll)
+	t.Cleanup(func() { grpcclient.CloseAll() }) //nolint:errcheck
 
 	conn := grpcclient.Get("grpc_health_test")
 	require.NotNil(t, conn)
