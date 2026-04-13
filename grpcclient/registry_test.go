@@ -57,3 +57,9 @@ func TestCloseAll_ReturnsError(t *testing.T) {
 	reset()
 	require.NoError(t, CloseAll())
 }
+
+func TestRegistry_Close(t *testing.T) {
+	r := NewRegistry()
+	require.NotNil(t, r)
+	require.NoError(t, r.Close())
+}

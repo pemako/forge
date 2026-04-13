@@ -135,6 +135,19 @@ func CloseAll() error {
 	return first
 }
 
+// Registry wraps the package-level gRPC connection registry and implements
+// app.Closer. Use NewRegistry() to obtain an instance and pass it to
+// app.WithCloser to close all connections on shutdown.
+type Registry struct{}
+
+// NewRegistry returns a Registry that can be used with app.WithCloser.
+func NewRegistry() *Registry { return &Registry{} }
+
+// Close closes all registered connections. Implements app.Closer.
+func (r *Registry) Close() error {
+	return CloseAll()
+}
+
 // Init reads named gRPC connection configs and registers each one.
 // Config keys follow the pattern "grpcclient.<name>.addr", ".insecure",
 // ".timeout", and ".retry". Services whose addr key is empty are silently
