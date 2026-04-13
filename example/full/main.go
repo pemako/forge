@@ -118,8 +118,10 @@ func main() {
 
 	// ── Storage (S3/OSS/COS — only when credentials are set) ─────────────
 	if cfg.GetString("storage.access_key") != "" {
-		if err := storage.Register("default", storage.WithConfig(cfg)); err != nil {
+		if storageBackend, err := storage.New(storage.WithConfig(cfg)); err != nil {
 			log.Warn(context.Background(), "storage init failed", logger.F("err", err))
+		} else if err := storage.Register("default", storageBackend); err != nil {
+			log.Warn(context.Background(), "storage register failed", logger.F("err", err))
 		}
 	}
 

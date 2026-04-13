@@ -30,12 +30,16 @@
 // Example (named registry):
 //
 //	// At startup:
-//	_ = storage.Register("avatars",
+//	store, err := storage.New(
 //	    storage.WithProvider("oss"),
 //	    storage.WithEndpoint("https://oss-cn-hangzhou.aliyuncs.com"),
 //	    storage.WithBucket("my-bucket"),
 //	    storage.WithAccessKey("key", "secret"),
 //	)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	_ = storage.Register("avatars", store)
 //
 //	// Elsewhere in the application:
 //	store := storage.Get("avatars")
@@ -223,36 +227,35 @@ var (
 // the given name already exists in the global registry.
 var ErrAlreadyRegistered = errors.Define(409, "STORAGE_ALREADY_REGISTERED", "storage already registered")
 
-// Register creates a Storage from opts and stores it under name in the global
-// registry. A subsequent call to Get(name) returns the same instance.
+// Register stores s in the global registry under name.
+// A subsequent call to Get(name) returns the same instance.
 // Register is safe for concurrent use and is typically called once at startup
 // per logical storage destination (e.g., "avatars", "documents").
-// Returns ErrAlreadyRegistered if a storage with that name already exists.
-func Register(name string, opts ...Option) error {
-	s, err := New(opts...)
-	if err != nil {
-		return err
-	}
+// Returns ErrAlreadyRegistered if name is already in use. Use Replace to overwrite.
+func Register(name string, s Storage) error {
 	registryMu.Lock()
+	defer registryMu.Unlock()
 	if _, ok := registry[name]; ok {
-		registryMu.Unlock()
 		return ErrAlreadyRegistered
 	}
+	registry[name] = s
+	return nil
+}
+
+// Replace stores s under name, overwriting any existing entry.
+// Storage backends hold no persistent connections that need explicit cleanup.
+func Replace(name string, s Storage) error {
+	registryMu.Lock()
 	registry[name] = s
 	registryMu.Unlock()
 	return nil
 }
 
-// Replace creates a Storage from opts and stores it under name, overwriting
-// any existing entry without error. Storage backends have no connections to
-// close, so the old instance is simply replaced.
-func Replace(name string, opts ...Option) error {
-	s, err := New(opts...)
-	if err != nil {
-		return err
-	}
+// CloseAll removes all registered Storage instances and returns nil.
+// Storage backends hold no persistent connections; this only clears the registry.
+func CloseAll() error {
 	registryMu.Lock()
-	registry[name] = s
+	clear(registry)
 	registryMu.Unlock()
 	return nil
 }

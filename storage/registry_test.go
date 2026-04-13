@@ -14,36 +14,59 @@ func reset() {
 
 func TestRegister_DuplicateError(t *testing.T) {
 	reset()
-	// S3 with only bucket+region — AWS SDK allows construction without real credentials.
-	err1 := Register("s3test",
+	s1, err := New(
 		WithProvider("s3"),
 		WithBucket("b1"),
 		WithRegion("us-east-1"),
 		WithAccessKey("k", "s"),
 	)
-	require.NoError(t, err1)
-	err2 := Register("s3test",
+	require.NoError(t, err)
+	require.NoError(t, Register("s3test", s1))
+
+	s2, err := New(
 		WithProvider("s3"),
 		WithBucket("b2"),
 		WithRegion("us-east-1"),
 		WithAccessKey("k", "s"),
 	)
-	require.ErrorIs(t, err2, ErrAlreadyRegistered)
+	require.NoError(t, err)
+	err = Register("s3test", s2)
+	require.ErrorIs(t, err, ErrAlreadyRegistered)
 }
 
 func TestReplace_Succeeds(t *testing.T) {
 	reset()
-	require.NoError(t, Register("r",
+	s1, err := New(
 		WithProvider("s3"),
 		WithBucket("b1"),
 		WithRegion("us-east-1"),
 		WithAccessKey("k", "s"),
-	))
-	require.NoError(t, Replace("r",
+	)
+	require.NoError(t, err)
+	require.NoError(t, Register("r", s1))
+
+	s2, err := New(
 		WithProvider("s3"),
 		WithBucket("b2"),
 		WithRegion("us-east-1"),
 		WithAccessKey("k", "s"),
-	))
+	)
+	require.NoError(t, err)
+	require.NoError(t, Replace("r", s2))
 	require.NotNil(t, Get("r"))
+}
+
+func TestCloseAll_ClearsRegistry(t *testing.T) {
+	reset()
+	s, err := New(
+		WithProvider("s3"),
+		WithBucket("b1"),
+		WithRegion("us-east-1"),
+		WithAccessKey("k", "s"),
+	)
+	require.NoError(t, err)
+	require.NoError(t, Register("ca", s))
+	require.NotNil(t, Get("ca"))
+	require.NoError(t, CloseAll())
+	require.Nil(t, Get("ca"))
 }

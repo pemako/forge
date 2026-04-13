@@ -51,22 +51,23 @@ func TestNew_cos_missingBucketOrEndpoint(t *testing.T) {
 }
 
 func TestRegister_unknownProvider(t *testing.T) {
-	err := storage.Register("bad", storage.WithProvider("nope"))
+	_, err := storage.New(storage.WithProvider("nope"))
 	require.Error(t, err)
 }
 
 func TestRegister_and_Get(t *testing.T) {
 	// Register an s3 backend (with bucket; it won't make real calls)
-	err := storage.Register(
-		"test-s3",
+	s, err := storage.New(
 		storage.WithProvider("s3"),
 		storage.WithBucket("test-bucket"),
 		storage.WithRegion("us-east-1"),
 	)
 	require.NoError(t, err)
+	err = storage.Register("test-s3", s)
+	require.NoError(t, err)
 
-	s := storage.Get("test-s3")
-	assert.NotNil(t, s)
+	got := storage.Get("test-s3")
+	assert.NotNil(t, got)
 }
 
 func TestNew_s3_withEndpoint(t *testing.T) {
@@ -108,7 +109,7 @@ func TestWithMetadata_applied(t *testing.T) {
 }
 
 func TestRegister_errorPropagated(t *testing.T) {
-	err := storage.Register("bad_provider", storage.WithProvider("unknown"))
+	_, err := storage.New(storage.WithProvider("unknown"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown provider")
 }
