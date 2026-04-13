@@ -95,6 +95,26 @@ func WithReadyCheck(name string, fn ReadyCheckFunc) Option {
 	}
 }
 
+// WithHealthChecks registers multiple core.HealthChecker instances as readiness
+// checks. This is equivalent to calling WithReadyCheck for each checker.
+// Use this when you have a slice of checkers built from database.Manager or
+// cache.Manager:
+//
+//	httpserver.New(
+//	    httpserver.WithHealthChecks(dbMgr.HealthChecker("default"), cacheMgr.HealthChecker("redis")),
+//	)
+func WithHealthChecks(checkers ...core.HealthChecker) Option {
+	return func(o *options) {
+		for _, c := range checkers {
+			c := c // capture loop variable
+			o.readyChecks = append(o.readyChecks, readyCheck{
+				name: c.Name(),
+				fn:   c.Check,
+			})
+		}
+	}
+}
+
 // WithConfig reads HTTP server settings from core.Config:
 // server.http.addr (addr), server.http.timeout (read+write timeout),
 // app.name (service name), and app.version (service version).

@@ -118,3 +118,70 @@ func TestHTTPServer_readyChecks_flagNotSet(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 503, resp.StatusCode)
 }
+
+// testHealthChecker is a minimal core.HealthChecker for use in tests.
+type testHealthChecker struct {
+	name    string
+	checkFn func(ctx context.Context) error
+}
+
+func (c *testHealthChecker) Name() string                    { return c.name }
+func (c *testHealthChecker) Check(ctx context.Context) error { return c.checkFn(ctx) }
+
+func TestWithHealthChecks_WiresCheckers(t *testing.T) {
+	called := false
+	checker := &testHealthChecker{
+		name: "db:default",
+		checkFn: func(_ context.Context) error {
+			called = true
+			return nil
+		},
+	}
+
+	lis, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+
+	srv, err := httpserver.New(
+		httpserver.WithListener(lis),
+		httpserver.WithHealthChecks(checker),
+	)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	go srv.Start(ctx)
+	time.Sleep(80 * time.Millisecond)
+	defer srv.Stop(ctx)
+
+	srv.SetReady(true)
+	resp, err := http.Get("http://" + lis.Addr().String() + "/readyz")
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.True(t, called, "checker should have been called during /readyz")
+}
+
+func TestAddReadyCheck_AfterConstruction(t *testing.T) {
+	called := false
+	lis, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+
+	srv, err := httpserver.New(httpserver.WithListener(lis))
+	require.NoError(t, err)
+
+	srv.AddReadyCheck("late", func(_ context.Context) error {
+		called = true
+		return nil
+	})
+
+	ctx := context.Background()
+	go srv.Start(ctx)
+	time.Sleep(80 * time.Millisecond)
+	defer srv.Stop(ctx)
+
+	srv.SetReady(true)
+	resp, err := http.Get("http://" + lis.Addr().String() + "/readyz")
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.True(t, called, "late-registered check should have been called")
+}

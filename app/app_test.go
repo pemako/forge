@@ -94,3 +94,22 @@ func TestWithCloser_CalledOnShutdown(t *testing.T) {
 	app.New(app.WithCloser(c), app.WithShutdownTimeout(time.Second)).Run()
 	require.True(t, closed)
 }
+
+// appTestChecker is a minimal core.HealthChecker for use in app tests.
+type appTestChecker struct {
+	name    string
+	checkFn func(ctx context.Context) error
+}
+
+func (c *appTestChecker) Name() string                    { return c.name }
+func (c *appTestChecker) Check(ctx context.Context) error { return c.checkFn(ctx) }
+
+func TestWithHealthCheck_Stored(t *testing.T) {
+	checker := &appTestChecker{
+		name:    "test",
+		checkFn: func(_ context.Context) error { return nil },
+	}
+	a := app.New(app.WithHealthCheck(checker))
+	require.Len(t, a.HealthCheckers(), 1)
+	require.Equal(t, "test", a.HealthCheckers()[0].Name())
+}

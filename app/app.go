@@ -39,6 +39,19 @@ func (a *App) log(ctx context.Context, msg string, fields ...core.Field) {
 	}
 }
 
+// HealthCheckers returns the registered health checkers.
+// Use in a WithBeforeStart hook to wire them into server/http:
+//
+//	app.WithBeforeStart(func(ctx context.Context) error {
+//	    for _, hc := range myApp.HealthCheckers() {
+//	        httpSrv.AddReadyCheck(hc.Name(), hc.Check)
+//	    }
+//	    return nil
+//	})
+func (a *App) HealthCheckers() []core.HealthChecker {
+	return a.opts.checkers
+}
+
 // Run starts the application lifecycle and blocks until the process receives
 // SIGTERM or SIGINT, or until a server returns a fatal error.
 // The lifecycle phases executed in order are:

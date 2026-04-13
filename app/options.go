@@ -57,6 +57,7 @@ type options struct {
 	migrator        Migrator
 	lifecycles      []Lifecycle
 	closers         []Closer
+	checkers        []core.HealthChecker
 	shutdownTimeout time.Duration
 	beforeStart     []func(context.Context) error
 	afterStop       []func(context.Context) error
@@ -118,4 +119,21 @@ func WithLifecycle(components ...Lifecycle) Option {
 // Errors are collected but do not stop subsequent Closers.
 func WithCloser(closers ...Closer) Option {
 	return func(o *options) { o.closers = append(o.closers, closers...) }
+}
+
+// WithHealthCheck registers one or more HealthChecker instances with the App.
+// The app does not automatically wire these into any server; callers should
+// bridge them to server/http in a WithBeforeStart hook:
+//
+//	app.New(
+//	    app.WithHealthCheck(dbMgr.HealthChecker("default")),
+//	    app.WithBeforeStart(func(ctx context.Context) error {
+//	        for _, hc := range a.HealthCheckers() {
+//	            httpSrv.AddReadyCheck(hc.Name(), hc.Check)
+//	        }
+//	        return nil
+//	    }),
+//	)
+func WithHealthCheck(checkers ...core.HealthChecker) Option {
+	return func(o *options) { o.checkers = append(o.checkers, checkers...) }
 }

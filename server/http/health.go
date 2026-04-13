@@ -9,7 +9,9 @@ import (
 // readyzHandler returns a handler that checks the ready flag AND runs all
 // registered custom check functions. Returns 200 only when all pass.
 // On failure it returns 503 with a JSON map of check name → "ok" or error message.
-func readyzHandler(svcName, version string, ready func() bool, checks []readyCheck) gin.HandlerFunc {
+// The checks func is called on every request so that checks added via AddReadyCheck
+// after construction are included.
+func readyzHandler(svcName, version string, ready func() bool, checks func() []readyCheck) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !ready() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -18,7 +20,8 @@ func readyzHandler(svcName, version string, ready func() bool, checks []readyChe
 			return
 		}
 
-		if len(checks) == 0 {
+		current := checks()
+		if len(current) == 0 {
 			c.JSON(http.StatusOK, gin.H{
 				"status":  "ok",
 				"service": svcName,
@@ -27,9 +30,9 @@ func readyzHandler(svcName, version string, ready func() bool, checks []readyChe
 			return
 		}
 
-		results := make(map[string]string, len(checks))
+		results := make(map[string]string, len(current))
 		allOK := true
-		for _, ch := range checks {
+		for _, ch := range current {
 			if err := ch.fn(c.Request.Context()); err != nil {
 				results[ch.name] = err.Error()
 				allOK = false

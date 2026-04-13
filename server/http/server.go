@@ -67,9 +67,24 @@ func New(opts ...Option) (*ginServer, error) {
 	// Register /readyz after s is created so the closure captures the instance.
 	r.GET("/readyz", readyzHandler(o.serviceName, o.serviceVersion, func() bool {
 		return s.ready.Load()
-	}, o.readyChecks))
+	}, func() []readyCheck {
+		return s.opts.readyChecks
+	}))
 
 	return s, nil
+}
+
+// AddReadyCheck adds a named readiness check to the server after construction.
+// Call this in app.WithBeforeStart to bridge health checkers from app.HealthCheckers():
+//
+//	app.WithBeforeStart(func(ctx context.Context) error {
+//	    for _, hc := range myApp.HealthCheckers() {
+//	        httpSrv.AddReadyCheck(hc.Name(), hc.Check)
+//	    }
+//	    return nil
+//	})
+func (s *ginServer) AddReadyCheck(name string, fn func(context.Context) error) {
+	s.opts.readyChecks = append(s.opts.readyChecks, readyCheck{name: name, fn: fn})
 }
 
 // SetReady marks this server instance as ready to serve traffic.
