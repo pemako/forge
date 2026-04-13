@@ -3,6 +3,7 @@ package httpserver_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"testing"
@@ -184,4 +185,54 @@ func TestAddReadyCheck_AfterConstruction(t *testing.T) {
 	resp.Body.Close()
 	assert.Equal(t, 200, resp.StatusCode)
 	assert.True(t, called, "late-registered check should have been called")
+}
+
+func TestWithHealthChecks_AllPass(t *testing.T) {
+	checker1 := &testHealthChecker{name: "svc1", checkFn: func(_ context.Context) error { return nil }}
+	checker2 := &testHealthChecker{name: "svc2", checkFn: func(_ context.Context) error { return nil }}
+
+	ln, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+	srv, err := httpserver.New(
+		httpserver.WithListener(ln),
+		httpserver.WithHealthChecks(checker1, checker2),
+	)
+	require.NoError(t, err)
+	srv.SetReady(true)
+
+	ctx := context.Background()
+	go srv.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+	defer srv.Stop(ctx)
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/readyz")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestWithHealthChecks_OneFails(t *testing.T) {
+	checkerOK := &testHealthChecker{name: "db", checkFn: func(_ context.Context) error { return nil }}
+	checkerFail := &testHealthChecker{name: "redis", checkFn: func(_ context.Context) error {
+		return fmt.Errorf("redis unreachable")
+	}}
+
+	ln, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+	srv, err := httpserver.New(
+		httpserver.WithListener(ln),
+		httpserver.WithHealthChecks(checkerOK, checkerFail),
+	)
+	require.NoError(t, err)
+	srv.SetReady(true)
+
+	ctx := context.Background()
+	go srv.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+	defer srv.Stop(ctx)
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/readyz")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 }

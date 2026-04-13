@@ -59,3 +59,8 @@ func TestCloseAll_ClosesManagers(t *testing.T) {
 	require.Nil(t, Get("a"))
 	require.Nil(t, Get("b"))
 }
+
+func TestCloseAll_EmptyRegistryReturnsNil(t *testing.T) {
+	reset()
+	require.NoError(t, CloseAll())
+}

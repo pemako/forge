@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -112,4 +113,68 @@ func TestWithHealthCheck_Stored(t *testing.T) {
 	a := app.New(app.WithHealthCheck(checker))
 	require.Len(t, a.HealthCheckers(), 1)
 	require.Equal(t, "test", a.HealthCheckers()[0].Name())
+}
+
+// testServer is a controllable core.Server for use in app tests.
+type testServer struct {
+	startFn func(ctx context.Context) error
+	stopFn  func(ctx context.Context) error
+}
+
+func (s *testServer) Start(ctx context.Context) error { return s.startFn(ctx) }
+func (s *testServer) Stop(ctx context.Context) error  { return s.stopFn(ctx) }
+
+func TestRun_LifecycleInitFailure_RollsBackPrevious(t *testing.T) {
+	order := []string{}
+	var mu sync.Mutex
+	track := func(s string) {
+		mu.Lock()
+		order = append(order, s)
+		mu.Unlock()
+	}
+
+	lc1 := &testLifecycle{
+		initFn:     func(ctx context.Context) error { track("lc1:init"); return nil },
+		shutdownFn: func(ctx context.Context) error { track("lc1:shutdown"); return nil },
+	}
+	lc2 := &testLifecycle{
+		initFn:     func(ctx context.Context) error { track("lc2:init"); return fmt.Errorf("lc2 failed") },
+		shutdownFn: func(ctx context.Context) error { track("lc2:shutdown"); return nil },
+	}
+
+	err := app.New(app.WithLifecycle(lc1, lc2)).Run()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "lc2 failed")
+
+	mu.Lock()
+	got := append([]string{}, order...)
+	mu.Unlock()
+	// lc1 init, lc2 init (fails), lc1 shutdown (rollback) — lc2 shutdown NOT called
+	require.Equal(t, []string{"lc1:init", "lc2:init", "lc1:shutdown"}, got)
+}
+
+func TestRun_ServerStartError_StopErrorBothCollected(t *testing.T) {
+	startErr := fmt.Errorf("start failed")
+	srv := &testServer{
+		startFn: func(ctx context.Context) error { return startErr },
+		stopFn:  func(ctx context.Context) error { return nil },
+	}
+	err := app.New(app.WithServer(srv)).Run()
+	require.Error(t, err)
+	// runErr is the start error; stop error is logged but runErr takes priority
+	require.Contains(t, err.Error(), "start failed")
+}
+
+func TestRun_CloserCalledAfterLifecycleShutdown(t *testing.T) {
+	order := []string{}
+	lc := &testLifecycle{
+		initFn:     func(ctx context.Context) error { return nil },
+		shutdownFn: func(ctx context.Context) error { order = append(order, "shutdown"); return nil },
+	}
+	c := &testCloser{closeFn: func() error { order = append(order, "close"); return nil }}
+
+	go sendSIGTERM()
+	app.New(app.WithLifecycle(lc), app.WithCloser(c), app.WithShutdownTimeout(time.Second)).Run()
+
+	require.Equal(t, []string{"shutdown", "close"}, order)
 }

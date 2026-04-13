@@ -33,6 +33,15 @@ func TestReplace_Succeeds(t *testing.T) {
 	require.NotNil(t, Get("gen"))
 }
 
+func TestReplace_AfterRegister(t *testing.T) {
+	reset()
+	g1, _ := New(WithWorkerID(1))
+	g2, _ := New(WithWorkerID(2))
+	Register("gen", g1) //nolint:errcheck
+	Replace("gen", g2)  //nolint:errcheck
+	require.Equal(t, g2, Get("gen"))
+}
+
 func TestCloseAll_ClearsRegistry(t *testing.T) {
 	reset()
 	g, _ := New(WithWorkerID(1))
