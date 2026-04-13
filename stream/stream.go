@@ -8,12 +8,13 @@
 // The Redis client is provided by the caller — typically via
 // cache.RedisClient("name") to share an existing connection:
 //
-//	stream.Init(cache.RedisClient("redis"))
-//	stream.Subscribe("order.created",
+//	bus, err := stream.New(cache.RedisClient("redis"))
+//	if err != nil { ... }
+//	bus.Subscribe("order.created",
 //	    stream.WithGroup("order-service"),
 //	    stream.WithHandler(handler),
 //	)
-//	app.New(app.WithServer(stream.Worker()))
+//	app.New(app.WithServer(bus.Worker()))
 package stream
 
 import (
@@ -23,7 +24,6 @@ import (
 	"os"
 	"sync"
 
-	"github.com/pemako/mk/core"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -48,9 +48,7 @@ func (m Message) Decode(dest any) error {
 }
 
 // Bus is a self-contained Redis Streams pub/sub instance.
-// Use New to create an isolated Bus (e.g., in tests or multi-tenant scenarios).
-// The package-level Init/Publish/Subscribe/Worker functions operate on a
-// shared default Bus.
+// Use New to create a Bus.
 type Bus struct {
 	rdb  *redis.Client
 	opts initOptions
@@ -59,12 +57,16 @@ type Bus struct {
 }
 
 // New creates a new Bus connected to the given Redis client.
-func New(client *redis.Client, options ...InitOption) *Bus {
+// Returns an error if client is nil.
+func New(client *redis.Client, options ...InitOption) (*Bus, error) {
+	if client == nil {
+		return nil, fmt.Errorf("stream: Redis client must not be nil")
+	}
 	o := defaultInitOptions()
 	for _, opt := range options {
 		opt(&o)
 	}
-	return &Bus{rdb: client, opts: o}
+	return &Bus{rdb: client, opts: o}, nil
 }
 
 // Publish writes payload to the Redis Stream identified by topic.
@@ -123,67 +125,5 @@ func (b *Bus) Worker() *streamWorker {
 		bus:  b,
 		done: make(chan struct{}),
 		log:  b.opts.log,
-	}
-}
-
-// --- package-level default Bus ---
-
-var _default *Bus
-
-// Init sets the Redis client used for all stream operations.
-// Must be called once before Publish, Subscribe, or Worker.
-//
-// The recommended pattern is to share the connection via the cache package:
-//
-//	stream.Init(cache.RedisClient("redis"))
-//
-// where "redis" is a named Redis backend registered in cache.Init.
-// This avoids duplicating the Redis address in the configuration.
-func Init(client *redis.Client, options ...InitOption) {
-	_default = New(client, options...)
-}
-
-// Publish writes payload to the Redis Stream identified by topic on the
-// default Bus. payload is JSON-marshalled before writing.
-func Publish(ctx context.Context, topic string, payload any) error {
-	if _default == nil {
-		return fmt.Errorf("stream: not initialized — call stream.Init first")
-	}
-	return _default.Publish(ctx, topic, payload)
-}
-
-// Subscribe registers a handler for the given topic on the default Bus.
-func Subscribe(topic string, opts ...SubOption) {
-	if _default == nil {
-		return
-	}
-	_default.Subscribe(topic, opts...)
-}
-
-// Worker returns a core.Server that reads from all registered subscriptions
-// on the default Bus.
-func Worker(l ...core.Logger) *streamWorker {
-	if _default == nil {
-		// Return a worker that does nothing until Init is called.
-		b := &Bus{opts: defaultInitOptions()}
-		if len(l) > 0 && l[0] != nil {
-			b.opts.log = l[0]
-		}
-		return b.Worker()
-	}
-	w := _default.Worker()
-	if len(l) > 0 && l[0] != nil {
-		w.log = l[0]
-	}
-	return w
-}
-
-// ResetSubs clears all registered subscriptions on the default Bus.
-// Intended for use in tests only to isolate test cases that share global state.
-func ResetSubs() {
-	if _default != nil {
-		_default.mu.Lock()
-		_default.subs = _default.subs[:0]
-		_default.mu.Unlock()
 	}
 }

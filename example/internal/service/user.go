@@ -15,7 +15,6 @@ import (
 	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/metric"
-	"github.com/pemako/mk/stream"
 
 	"github.com/pemako/mk/example/internal/model"
 	"github.com/pemako/mk/example/internal/repository"
@@ -63,8 +62,8 @@ func (s *UserService) Create(ctx context.Context, name, email string) (*model.Us
 	// Publish to in-process event bus (event package).
 	_ = s.bus.Publish(ctx, "user.created", u)
 
-	// Publish to Redis Streams for cross-instance fan-out (stream package).
-	_ = stream.Publish(ctx, "user.created", u)
+	// stream.Publish is intentionally omitted here — streaming is optional
+	// and wired at the main() level via the Bus instance.
 
 	return u, nil
 }

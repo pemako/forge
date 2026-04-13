@@ -25,13 +25,19 @@ func newTestRedis(t *testing.T) *redis.Client {
 	return redis.NewClient(&redis.Options{Addr: mr.Addr()})
 }
 
-func TestPublishSubscribe_workQueue(t *testing.T) {
+func newTestBus(t *testing.T) *stream.Bus {
+	t.Helper()
 	rdb := newTestRedis(t)
-	stream.Init(rdb)
-	stream.ResetSubs()
+	bus, err := stream.New(rdb)
+	require.NoError(t, err)
+	return bus
+}
+
+func TestPublishSubscribe_workQueue(t *testing.T) {
+	bus := newTestBus(t)
 
 	var count atomic.Int32
-	stream.Subscribe("test.order",
+	bus.Subscribe("test.order",
 		stream.WithGroup("order-svc"),
 		stream.WithConsumer("instance-1"),
 		stream.WithHandler(func(_ context.Context, msg stream.Message) error {
@@ -43,7 +49,7 @@ func TestPublishSubscribe_workQueue(t *testing.T) {
 		}),
 	)
 
-	w := stream.Worker()
+	w := bus.Worker()
 	ctx, cancel := context.WithCancel(context.Background())
 	go w.Start(ctx)
 	defer w.Stop(ctx)
@@ -51,7 +57,7 @@ func TestPublishSubscribe_workQueue(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond) // let worker start
 
-	err := stream.Publish(context.Background(), "test.order", orderEvent{OrderID: 42})
+	err := bus.Publish(context.Background(), "test.order", orderEvent{OrderID: 42})
 	require.NoError(t, err)
 
 	time.Sleep(200 * time.Millisecond)
@@ -59,12 +65,10 @@ func TestPublishSubscribe_workQueue(t *testing.T) {
 }
 
 func TestPublishSubscribe_retry(t *testing.T) {
-	rdb := newTestRedis(t)
-	stream.Init(rdb)
-	stream.ResetSubs()
+	bus := newTestBus(t)
 
 	var attempts atomic.Int32
-	stream.Subscribe("test.retry",
+	bus.Subscribe("test.retry",
 		stream.WithGroup("retry-svc"),
 		stream.WithConsumer("instance-1"),
 		stream.WithRetries(2),
@@ -78,7 +82,7 @@ func TestPublishSubscribe_retry(t *testing.T) {
 		}),
 	)
 
-	w := stream.Worker()
+	w := bus.Worker()
 	ctx, cancel := context.WithCancel(context.Background())
 	go w.Start(ctx)
 	defer w.Stop(ctx)
@@ -86,18 +90,10 @@ func TestPublishSubscribe_retry(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	require.NoError(t, stream.Publish(context.Background(), "test.retry", orderEvent{OrderID: 1}))
+	require.NoError(t, bus.Publish(context.Background(), "test.retry", orderEvent{OrderID: 1}))
 
 	time.Sleep(300 * time.Millisecond)
 	assert.Equal(t, int32(3), attempts.Load(), "should have retried twice")
-}
-
-func TestPublish_notInitialized(t *testing.T) {
-	// Reset global state for this test by re-initializing with nil
-	// (this is a white-box test — in practice Init is always called)
-	err := stream.Publish(context.Background(), "topic", "payload")
-	// Either succeeds (if previous test initialized) or returns error
-	_ = err // acceptable either way
 }
 
 func TestMessage_Decode(t *testing.T) {
@@ -109,7 +105,8 @@ func TestMessage_Decode(t *testing.T) {
 
 func TestBus_isolated(t *testing.T) {
 	rdb := newTestRedis(t)
-	bus := stream.New(rdb)
+	bus, err := stream.New(rdb)
+	require.NoError(t, err)
 
 	var count atomic.Int32
 	bus.Subscribe("isolated.topic",
@@ -131,4 +128,16 @@ func TestBus_isolated(t *testing.T) {
 	require.NoError(t, bus.Publish(context.Background(), "isolated.topic", map[string]any{"x": 1}))
 	time.Sleep(200 * time.Millisecond)
 	assert.Equal(t, int32(1), count.Load())
+}
+
+func TestNew_NilClientReturnsError(t *testing.T) {
+	_, err := stream.New(nil)
+	require.Error(t, err)
+}
+
+func TestNew_NonNilClientReturnsWorker(t *testing.T) {
+	rdb := newTestRedis(t)
+	bus, err := stream.New(rdb)
+	require.NoError(t, err)
+	require.NotNil(t, bus.Worker())
 }

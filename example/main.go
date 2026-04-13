@@ -137,11 +137,17 @@ func main() {
 
 	// ── Stream (cross-instance, Redis Streams) ────────────────────────────
 	rdb := cache.RedisClient("redis")
+	var streamBus *stream.Bus
 	if rdb != nil {
-		stream.Init(rdb, stream.WithLogger(log))
+		var streamErr error
+		streamBus, streamErr = stream.New(rdb, stream.WithLogger(log))
+		if streamErr != nil {
+			log.Error(context.Background(), "stream init failed", logger.F("err", streamErr))
+			os.Exit(1)
+		}
 
 		// Work queue: only one instance processes each order event
-		stream.Subscribe("order.created",
+		streamBus.Subscribe("order.created",
 			stream.WithGroup("example-service"),
 			stream.WithRetries(3),
 			stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
@@ -151,7 +157,7 @@ func main() {
 		)
 
 		// Broadcast: every instance reloads config on this event
-		stream.Subscribe("config.reload",
+		streamBus.Subscribe("config.reload",
 			stream.WithBroadcast(),
 			stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
 				log.Info(ctx, "stream: config reload triggered")
@@ -234,8 +240,8 @@ func main() {
 
 	// Demo: publish a stream event endpoint
 	r.POST("/api/v1/demo/stream", func(c *gin.Context) {
-		if rdb != nil {
-			_ = stream.Publish(c.Request.Context(), "order.created", map[string]any{"demo": true})
+		if streamBus != nil {
+			_ = streamBus.Publish(c.Request.Context(), "order.created", map[string]any{"demo": true})
 		}
 		c.JSON(200, gin.H{"ok": true})
 	})
@@ -288,8 +294,8 @@ func main() {
 
 	// ── App Lifecycle ──────────────────────────────────────────────────────
 	servers := []core.Server{httpSrv, grpcSrv, scheduler}
-	if rdb != nil {
-		servers = append(servers, stream.Worker(log))
+	if streamBus != nil {
+		servers = append(servers, streamBus.Worker())
 	}
 
 	// pprof: two modes depending on deployment scenario.

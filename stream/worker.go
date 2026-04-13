@@ -20,7 +20,7 @@ type streamWorker struct {
 // Start implements core.Server. It blocks until Stop is called.
 func (w *streamWorker) Start(ctx context.Context) error {
 	if w.bus == nil || w.bus.rdb == nil {
-		return fmt.Errorf("stream: not initialized — call stream.Init before Worker.Start")
+		return fmt.Errorf("stream: Bus has no Redis client — pass a valid *redis.Client to stream.New")
 	}
 
 	w.bus.mu.RLock()
