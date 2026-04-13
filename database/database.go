@@ -10,6 +10,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
+
+	"github.com/pemako/mk/errors"
 )
 
 // Manager holds the configuration for all registered database connections and
@@ -22,6 +24,10 @@ var (
 	registry   = map[string]*gorm.DB{}
 	registryMu sync.RWMutex
 )
+
+// ErrAlreadyRegistered is returned by New when a connection with the given
+// name already exists in the global registry.
+var ErrAlreadyRegistered = errors.Define(409, "DATABASE_ALREADY_REGISTERED", "database connection already registered")
 
 // New opens all configured database connections, validates each with a Ping,
 // applies connection pool settings, optionally installs the tracing plugin,
@@ -63,6 +69,12 @@ func New(opts ...Option) (*Manager, error) {
 		}
 
 		registryMu.Lock()
+		if _, ok := registry[d.name]; ok {
+			registryMu.Unlock()
+			sqlDB, _ := db.DB()
+			sqlDB.Close() //nolint:errcheck
+			return nil, ErrAlreadyRegistered
+		}
 		registry[d.name] = db
 		registryMu.Unlock()
 	}
