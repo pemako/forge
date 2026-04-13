@@ -46,7 +46,6 @@ auth:
 tracing:
   endpoint: "otel-sdk-in.domob-inc.com:14317"
   sampler: 1.0
-  tls: true   # port 14317 uses TLS in most production environments
 
 metric:
   prometheus_addr: :19091
