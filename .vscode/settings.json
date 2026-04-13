@@ -1,8 +1,14 @@
 {
   "cSpell.words": [
+    "circuitbreaker",
     "grpcclient",
     "grpcserver",
     "httpclient",
-    "idgen"
+    "idgen",
+    "lifecycles",
+    "mkerrors",
+    "mwgrpc",
+    "mwhttp",
+    "otelmetric"
   ]
 }

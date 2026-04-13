@@ -15,9 +15,9 @@ import (
 // Returns 1 on success, 0 if the key is gone or owned by another instance.
 const renewLua = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
-    return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+  return redis.call("PEXPIRE", KEYS[1], ARGV[2])
 else
-    return 0
+  return 0
 end`
 
 // autoRenewer periodically renews the lock TTL.

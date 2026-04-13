@@ -5,8 +5,9 @@ import (
 	stderrors "errors"
 	"testing"
 
-	"github.com/pemako/mk/errors"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pemako/mk/errors"
 )
 
 func TestDefine(t *testing.T) {

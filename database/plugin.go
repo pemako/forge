@@ -4,11 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/logger"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
+
+	"github.com/pemako/mk/core"
+	"github.com/pemako/mk/logger"
 )
 
 const pluginName = "mk:tracing"

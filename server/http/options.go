@@ -106,7 +106,6 @@ func WithReadyCheck(name string, fn ReadyCheckFunc) Option {
 func WithHealthChecks(checkers ...core.HealthChecker) Option {
 	return func(o *options) {
 		for _, c := range checkers {
-			c := c // capture loop variable
 			o.readyChecks = append(o.readyChecks, readyCheck{
 				name: c.Name(),
 				fn:   c.Check,

@@ -21,9 +21,9 @@ const (
 	// releasing a lock acquired by another instance).
 	releaseLua = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
-    return redis.call("DEL", KEYS[1])
+  return redis.call("DEL", KEYS[1])
 else
-    return 0
+  return 0
 end`
 )
 

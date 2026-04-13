@@ -48,13 +48,11 @@ func TestNext_concurrent(t *testing.T) {
 	ids := make(chan int64, goroutines*perG)
 	var wg sync.WaitGroup
 	for range goroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range perG {
 				ids <- g.Next()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(ids)
@@ -134,13 +132,11 @@ func TestULID_concurrent(t *testing.T) {
 	ids := make(chan string, goroutines*perG)
 	var wg sync.WaitGroup
 	for range goroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range perG {
 				ids <- idgen.ULID()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(ids)

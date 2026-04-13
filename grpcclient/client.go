@@ -16,11 +16,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pemako/mk/errors"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pemako/mk/errors"
 )
 
 // ErrAlreadyRegistered is returned by Register when a connection with the given

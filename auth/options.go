@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/pemako/mk/core"
 	"github.com/pemako/mk/logger"
 )

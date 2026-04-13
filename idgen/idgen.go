@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/bwmarrin/snowflake"
+
 	"github.com/pemako/mk/core"
 	"github.com/pemako/mk/errors"
 	"github.com/pemako/mk/logger"

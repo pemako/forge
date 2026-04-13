@@ -19,9 +19,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	mkerrors "github.com/pemako/mk/errors"
 	"github.com/pemako/mk/logger"
-	"github.com/redis/go-redis/v9"
 )
 
 // ErrCacheMiss is returned when a key does not exist or has expired.

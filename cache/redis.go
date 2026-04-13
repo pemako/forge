@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pemako/mk/core"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/pemako/mk/core"
 )
 
 type redisCache struct {
