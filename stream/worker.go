@@ -30,7 +30,6 @@ func (w *streamWorker) Start(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	for _, sub := range localSubs {
-		sub := sub
 		// Ensure the consumer group exists; ignore BUSYGROUP error (already exists).
 		err := w.bus.rdb.XGroupCreateMkStream(ctx, sub.topic, sub.group, "0").Err()
 		if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
@@ -41,16 +40,11 @@ func (w *streamWorker) Start(ctx context.Context) error {
 			)
 		}
 
-		n := sub.concurrency
-		if n < 1 {
-			n = 1
-		}
+		n := max(sub.concurrency, 1)
 		for range n {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				w.consume(sub)
-			}()
+			})
 		}
 	}
 

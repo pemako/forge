@@ -20,6 +20,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"maps"
 	"sync"
 	"time"
 
@@ -81,9 +82,7 @@ func Init(opts ...Option) error {
 	}
 
 	registryMu.Lock()
-	for name, c := range built {
-		registry[name] = c
-	}
+	maps.Copy(registry, built)
 	registryMu.Unlock()
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/pemako/mk/tracing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -43,7 +44,7 @@ func TestNew_withEndpoint_noConnection(t *testing.T) {
 	// endpoint set but unreachable — New should still succeed
 	// (connection is lazy in OTLP exporters)
 	p, err := tracing.New(
-		tracing.WithEndpoint("localhost:14317"),
+		tracing.WithOTLP("localhost:14317"),
 		tracing.WithServiceName("test"),
 		tracing.WithSampler(0.5),
 	)
@@ -54,6 +55,53 @@ func TestNew_withEndpoint_noConnection(t *testing.T) {
 	defer cancel()
 	_ = p.Shutdown(ctx)
 }
+
+func TestNew_withEndpointAlias_noConnection(t *testing.T) {
+	// WithEndpoint is kept as alias for backward compat
+	p, err := tracing.New(tracing.WithEndpoint("localhost:14317"))
+	require.NoError(t, err)
+	assert.NotNil(t, p)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Shutdown(ctx)
+}
+
+func TestNew_multipleExporters(t *testing.T) {
+	// Both exporters unreachable — New should succeed, Shutdown should not hang.
+	p, err := tracing.New(
+		tracing.WithOTLP("localhost:14317"),
+		tracing.WithZipkin("http://localhost:9411/api/v2/spans"),
+	)
+	require.NoError(t, err)
+	assert.NotNil(t, p)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Shutdown(ctx)
+}
+
+func TestNew_withJaeger_noConnection(t *testing.T) {
+	p, err := tracing.New(tracing.WithJaeger("http://localhost:14268/api/traces"))
+	require.NoError(t, err)
+	assert.NotNil(t, p)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Shutdown(ctx)
+}
+
+func TestNew_withCustomExporter(t *testing.T) {
+	p, err := tracing.New(tracing.WithExporter(&noopExporter{}))
+	require.NoError(t, err)
+	assert.NotNil(t, p)
+	_ = p.Shutdown(context.Background())
+}
+
+// noopExporter implements sdktrace.SpanExporter as a no-op for testing.
+type noopExporter struct{}
+
+func (n *noopExporter) ExportSpans(_ context.Context, _ []sdktrace.ReadOnlySpan) error {
+	return nil
+}
+func (n *noopExporter) Shutdown(_ context.Context) error { return nil }
 
 func TestWithConfig_reads(t *testing.T) {
 	cfg, err := config.Load(config.WithFile("../config/testdata/config.yaml"))

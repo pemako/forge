@@ -2,9 +2,8 @@ package grpcMiddleware
 
 import (
 	"context"
-	"sync"
 
-	"golang.org/x/time/rate"
+	"github.com/pemako/mk/ratelimit"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
@@ -34,13 +33,9 @@ func UnaryRateLimit(cfg GRPCRateLimitConfig) grpc.UnaryServerInterceptor {
 			return "unknown"
 		}
 	}
-	var mu sync.Map
-	getLimiter := func(key string) *rate.Limiter {
-		v, _ := mu.LoadOrStore(key, rate.NewLimiter(rate.Limit(cfg.Rate), cfg.Burst))
-		return v.(*rate.Limiter)
-	}
+	lim := ratelimit.New(ratelimit.WithRate(cfg.Rate), ratelimit.WithBurst(cfg.Burst))
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if !getLimiter(cfg.KeyFunc(ctx)).Allow() {
+		if !lim.Allow(ctx, cfg.KeyFunc(ctx)) {
 			return nil, status.Error(codes.ResourceExhausted, "too many requests")
 		}
 		return handler(ctx, req)

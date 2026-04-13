@@ -220,6 +220,9 @@ circuitbreaker/  ← three-state circuit breaker (Closed/Open/HalfOpen); Execute
 storage/         ← Storage interface; S3 / Alibaba OSS / Tencent COS backends
 notify/          ← Email(SMTP) / SMS(Aliyun) / DingTalk / WeCom / Feishu notification channels
 pprof/           ← pprof profiling endpoints; standalone server (core.Server) or Register on existing gin.Engine
+idgen/           ← Snowflake ID generator; package-level Next() + named registry; WithWorkerID/WithConfig
+testutil/        ← test helpers: FreePort, NewConfig (stub core.Config), NewLogger (writes to t.Log)
+ratelimit/       ← Limiter interface; in-process token-bucket or distributed Redis fixed-window; used by middleware
 ```
 
 ### Key patterns used everywhere

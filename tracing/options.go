@@ -1,23 +1,42 @@
 // Package tracing provides an OpenTelemetry tracing provider for mk services.
-// When an OTLP endpoint is configured, spans are exported via OTLP/HTTP.
-// When no endpoint is configured, a no-op provider is returned so instrumented
+// Multiple exporters can be registered simultaneously so spans are forwarded to
+// more than one backend in a single process.
+//
+// When no exporter is configured, a no-op provider is returned so instrumented
 // code works without requiring a collector in development or test environments.
 //
-// Use New to create a Provider, and register its Shutdown method with
+// Use New to create a Provider, register its Shutdown method with
 // app.WithAfterStop to ensure all spans are flushed on exit.
+//
+// Example — single OTLP backend:
+//
+//	p, _ := tracing.New(
+//	    tracing.WithServiceName("order-svc"),
+//	    tracing.WithOTLP("http://otel-collector:4318"),
+//	)
+//
+// Example — OTLP + Zipkin simultaneously:
+//
+//	p, _ := tracing.New(
+//	    tracing.WithOTLP("http://otel-collector:4318"),
+//	    tracing.WithZipkin("http://zipkin:9411/api/v2/spans"),
+//	)
 package tracing
 
 import (
+	"context"
 	"net/url"
 
 	"github.com/pemako/mk/core"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // options holds the functional configuration for New.
 type options struct {
 	serviceName string
-	endpoint    string
 	sampler     float64
+	exporters   []sdktrace.SpanExporter // built lazily in New
+	exporterFns []func(ctx context.Context) (sdktrace.SpanExporter, error)
 }
 
 // Option is a functional option for configuring the tracing Provider.
@@ -27,21 +46,70 @@ type Option func(*options)
 // Defaults to "service".
 func WithServiceName(name string) Option { return func(o *options) { o.serviceName = name } }
 
-// WithEndpoint sets the OTLP collector endpoint (e.g., "http://localhost:4318").
-// When empty, a no-op provider is used. Accepts full URLs or host:port strings.
-func WithEndpoint(ep string) Option { return func(o *options) { o.endpoint = ep } }
-
 // WithSampler sets the trace sampling ratio in the range [0.0, 1.0].
 // 1.0 samples all traces; 0.0 samples none. Defaults to 1.0.
 func WithSampler(ratio float64) Option { return func(o *options) { o.sampler = ratio } }
 
+// WithOTLP registers an OTLP/HTTP exporter sending spans to endpoint.
+// endpoint accepts a full URL ("http://host:4318") or host:port ("host:4318").
+// Multiple WithOTLP calls register multiple exporters.
+// This is the recommended exporter for most backends, including modern Jaeger
+// (≥ 1.35) which accepts OTLP natively on port 4318.
+func WithOTLP(endpoint string) Option {
+	return func(o *options) {
+		o.exporterFns = append(o.exporterFns, newOTLPExporter(endpoint))
+	}
+}
+
+// WithEndpoint is an alias for WithOTLP, kept for backward compatibility.
+// Prefer WithOTLP in new code.
+func WithEndpoint(endpoint string) Option { return WithOTLP(endpoint) }
+
+// WithJaeger registers a Jaeger Thrift/HTTP exporter sending spans to endpoint
+// (e.g., "http://jaeger:14268/api/traces").
+//
+// Deprecated: Jaeger ≥ 1.35 accepts OTLP natively. Prefer:
+//
+//	tracing.WithOTLP("http://jaeger:4318")
+//
+// Use WithJaeger only when targeting a Jaeger instance that does not support OTLP.
+func WithJaeger(endpoint string) Option {
+	return func(o *options) {
+		o.exporterFns = append(o.exporterFns, newJaegerExporter(endpoint))
+	}
+}
+
+// WithZipkin registers a Zipkin exporter sending spans to endpoint
+// (e.g., "http://zipkin:9411/api/v2/spans").
+//
+// Deprecated: the upstream OTel Zipkin exporter will be removed in early 2027.
+// Use WithZipkin only when targeting a Zipkin backend that cannot be migrated to OTLP.
+func WithZipkin(endpoint string) Option {
+	return func(o *options) {
+		o.exporterFns = append(o.exporterFns, newZipkinExporter(endpoint))
+	}
+}
+
+// WithExporter registers a pre-built SpanExporter. Use this for custom or
+// third-party exporters (e.g., Datadog, Lightstep) that are not directly
+// supported by the built-in options.
+func WithExporter(exp sdktrace.SpanExporter) Option {
+	return func(o *options) {
+		o.exporterFns = append(o.exporterFns, func(_ context.Context) (sdktrace.SpanExporter, error) {
+			return exp, nil
+		})
+	}
+}
+
 // WithConfig reads tracing settings from core.Config:
-// tracing.endpoint (collector URL), tracing.sampler (sampling ratio 0.0–1.0),
-// and app.name (service name).
+//
+//	tracing.endpoint — OTLP collector URL (sets one OTLP exporter, same as WithOTLP)
+//	tracing.sampler  — sampling ratio 0.0–1.0
+//	app.name         — service name
 func WithConfig(cfg core.Config) Option {
 	return func(o *options) {
 		if v := cfg.GetString("tracing.endpoint"); v != "" {
-			o.endpoint = v
+			WithOTLP(v)(o)
 		}
 		if v := cfg.GetFloat64("tracing.sampler"); v > 0 {
 			o.sampler = v

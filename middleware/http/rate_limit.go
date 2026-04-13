@@ -2,11 +2,10 @@ package httpMiddleware
 
 import (
 	"net/http"
-	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pemako/mk/errors"
-	"golang.org/x/time/rate"
+	"github.com/pemako/mk/ratelimit"
 )
 
 // RateLimitConfig configures the token-bucket rate limiter middleware.
@@ -27,13 +26,9 @@ func RateLimit(cfg RateLimitConfig) gin.HandlerFunc {
 	if cfg.KeyFunc == nil {
 		cfg.KeyFunc = func(c *gin.Context) string { return c.ClientIP() }
 	}
-	var mu sync.Map
-	getLimiter := func(key string) *rate.Limiter {
-		v, _ := mu.LoadOrStore(key, rate.NewLimiter(rate.Limit(cfg.Rate), cfg.Burst))
-		return v.(*rate.Limiter)
-	}
+	lim := ratelimit.New(ratelimit.WithRate(cfg.Rate), ratelimit.WithBurst(cfg.Burst))
 	return func(c *gin.Context) {
-		if !getLimiter(cfg.KeyFunc(c)).Allow() {
+		if !lim.Allow(c.Request.Context(), cfg.KeyFunc(c)) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, errors.ErrTooMany)
 			return
 		}

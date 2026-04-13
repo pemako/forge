@@ -3,7 +3,6 @@ package pprof_test
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -13,16 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pemako/mk/pprof"
+	"github.com/pemako/mk/testutil"
 )
 
 // freePort returns a random available TCP port on localhost.
 func freePort(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "localhost:0")
-	require.NoError(t, err)
-	addr := ln.Addr().String()
-	ln.Close()
-	return addr
+	return testutil.FreePort(t)
 }
 
 func TestServer_startsAndResponds(t *testing.T) {
@@ -101,9 +97,7 @@ func TestServer_mutexProfiling(t *testing.T) {
 
 func TestServer_withConfig(t *testing.T) {
 	addr := freePort(t)
-
-	// Simulate core.Config via a simple stub.
-	cfg := &stubConfig{values: map[string]string{"pprof.addr": addr}}
+	cfg := testutil.NewConfig(map[string]string{"pprof.addr": addr})
 	srv := pprof.New(pprof.WithConfig(cfg))
 
 	ctx := context.Background()
@@ -157,15 +151,4 @@ func TestRegister_withMutexFraction(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
-// stubConfig is a minimal core.Config implementation for tests.
-type stubConfig struct{ values map[string]string }
-
-func (s *stubConfig) Get(key string) any                   { return s.values[key] }
-func (s *stubConfig) GetString(key string) string          { return s.values[key] }
-func (s *stubConfig) GetInt(key string) int                { return 0 }
-func (s *stubConfig) GetBool(key string) bool              { return false }
-func (s *stubConfig) GetFloat64(key string) float64        { return 0 }
-func (s *stubConfig) GetDuration(key string) time.Duration { return 0 }
-func (s *stubConfig) GetStringSlice(key string) []string   { return nil }
-func (s *stubConfig) Scan(key string, dest any) error      { return nil }
-func (s *stubConfig) Watch(key string, fn func(any)) error { return nil }
+// stubConfig and time import removed — now using testutil.NewConfig and testutil.FreePort

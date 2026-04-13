@@ -32,6 +32,9 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 | `notify` | Multi-channel notification dispatcher: Email (SMTP), SMS, DingTalk, WeCom, and Feishu webhooks |
 | `stream` | Distributed pub/sub and work-queue messaging backed by Redis Streams (XADD / XREADGROUP) |
 | `pprof` | pprof profiling endpoints; standalone server on a dedicated port or mounted on an existing gin.Engine |
+| `idgen` | Snowflake ID generator; package-level `Next()` and named registry; auto-derives worker ID from host IP |
+| `testutil` | Test helpers: `FreePort`, `NewConfig` (stub `core.Config` with type coercion), `NewLogger` (writes to `t.Log`) |
+| `ratelimit` | Standalone `Limiter` interface; in-process token-bucket or distributed Redis fixed-window; backs HTTP/gRPC middleware |
 
 ## Installation
 

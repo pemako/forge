@@ -120,7 +120,6 @@ func (b *Bus) Publish(ctx context.Context, topic string, payload any) error {
 
 	if b.async {
 		for _, h := range handlers {
-			h := h
 			go func() {
 				// Use a detached context so handler is not cancelled when
 				// the caller's request context is cancelled.
