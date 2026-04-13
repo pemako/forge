@@ -29,6 +29,51 @@ app/              ← import core/ only; all other types passed in as interface 
 - New packages MUST NOT import `server/http`, `server/grpc`, `middleware/*`, or `app`
 - Circular imports detected via `go build ./...` must be resolved before committing
 
+## 2.1 Package Tiers and Stability Contracts
+
+`mk` has grown beyond a minimal framework into an internal platform library. Packages are grouped into four tiers with different stability and maintenance expectations. **When adding a new package, assign it to a tier before merging.**
+
+### Tier 1 — Core Stable
+
+`core`, `errors`, `app`, `config`, `logger`
+
+- Interfaces and exported behavior are **frozen**. No breaking changes without a major version bump.
+- All other tiers may depend on these.
+- Keep dependencies minimal; avoid pulling in large third-party libraries.
+
+### Tier 2 — Infrastructure Integrations
+
+`server/http`, `server/grpc`, `middleware/http`, `middleware/grpc`, `tracing`, `metric`, `database`, `cache`, `httpclient`, `grpcclient`, `lock`, `stream`, `cron`, `storage`
+
+- APIs are stable; additive changes only within a minor version.
+- Each package wraps an external system (Redis, OTLP, gRPC, SQL, S3). Upgrades to underlying libraries may surface as non-breaking behavior changes.
+- Breaking changes require a deprecation notice in at least one minor release before removal.
+
+### Tier 3 — Opinionated Extensions
+
+`auth`, `validate`, `pagination`, `ratelimit`, `circuitbreaker`, `notify`, `idgen`, `pprof`
+
+- Usable in production but **opinionated** about conventions (e.g., JWT format, pagination envelope shape, notification channels).
+- Teams may prefer their own implementations; these packages are not required by the framework core.
+- Minor breaking changes are acceptable between minor versions with a CHANGELOG entry.
+- A package graduates from Tier 3 to Tier 2 when it has been used in 3+ production services without API complaints.
+
+### Developer Utilities
+
+`event`, `testutil`
+
+- `event`: In-process pub/sub only. Use `stream` for cross-instance coordination. No API stability guarantee — it exists for process-local decoupling during development and testing.
+- `testutil`: Test scaffolding; never import in production code. API may change freely.
+
+### Tier assignment checklist for new packages
+
+Before opening a PR for a new package, answer:
+
+1. Does it wrap an external system? → Tier 2
+2. Is it opinionated about a business-level convention? → Tier 3
+3. Is it purely test scaffolding or in-process utilities? → Developer Utilities
+4. Does it define interfaces consumed by other tiers? → Tier 1 (requires team consensus)
+
 ## 3. Global vs Instance
 
 ### Always instance-first (no package-level state)

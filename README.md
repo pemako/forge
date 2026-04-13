@@ -27,39 +27,69 @@ Registry packages (`database`, `cache`, `httpclient`, `grpcclient`, `storage`, `
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design guide.
 
+## Package Tiers
+
+`mk` organizes its packages into four tiers with different stability contracts:
+
+| Tier | Packages | Stability |
+|------|----------|-----------|
+| **Core Stable** | `core`, `errors`, `app`, `config`, `logger` | Interfaces and behavior are frozen. Breaking changes require a major version bump. |
+| **Infrastructure Integrations** | `server/*`, `middleware/*`, `database`, `cache`, `tracing`, `metric`, `httpclient`, `grpcclient`, `lock`, `stream`, `cron`, `storage` | Stable APIs; additive changes only. External dependencies (Redis, OTLP, gRPC) may constrain upgrades. |
+| **Opinionated Extensions** | `auth`, `validate`, `pagination`, `ratelimit`, `notify`, `idgen`, `circuitbreaker`, `pprof` | Usable in production but opinionated. Teams may prefer their own implementations. Minor breaking changes are possible between minor versions. |
+| **Developer Utilities** | `testutil`, `event` | Convenience helpers with no cross-service API surface. `event` is in-process only; use `stream` for cross-instance coordination. |
+
+> **Practical guidance:** Start with Core Stable packages. Add Infrastructure Integrations for external connections. Use Opinionated Extensions only if they fit your conventions — they are easy to replace.
+
 ## Features
+
+### Core Stable
+
+| Package  | Description                                                                                                    |
+| -------- | -------------------------------------------------------------------------------------------------------------- |
+| `core`   | Shared interfaces: `Logger`, `Config`, `Server`, `Provider`, `HealthChecker`                                   |
+| `errors` | Structured `CodedError` with HTTP code, machine-readable reason, and cause chaining                            |
+| `app`    | Lifecycle runner: Lifecycle.Init → BeforeStart → concurrent servers → Stop → Lifecycle.Shutdown → Closer.Close → AfterStop; `WithHealthCheck` / `HealthCheckers()` |
+| `config` | Viper-backed config loader with file, env-var, and hot-reload support                                          |
+| `logger` | Zap-backed structured logger with trace injection, field masking, and level-split file output                  |
+
+### Infrastructure Integrations
 
 | Package           | Description                                                                                                                |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `core`            | Shared interfaces: `Logger`, `Config`, `Server`, `Provider`, `HealthChecker`                                               |
-| `errors`          | Structured `CodedError` with HTTP code, machine-readable reason, and cause chaining                                        |
-| `app`             | Lifecycle runner: Lifecycle.Init → BeforeStart → concurrent servers → Stop → Lifecycle.Shutdown → Closer.Close → AfterStop; `WithHealthCheck` / `HealthCheckers()` |
-| `config`          | Viper-backed config loader with file, env-var, and hot-reload support                                                      |
-| `logger`          | Zap-backed structured logger with trace injection, field masking, and level-split file output                              |
-| `tracing`         | OpenTelemetry OTLP trace provider; implements `app.Lifecycle`; no-op when endpoint is unset                                |
-| `metric`          | OTel metrics with Prometheus and OTLP exporters; implements `app.Lifecycle`; automatic HTTP/gRPC instrumentation           |
 | `server/http`     | Gin HTTP server; default middleware stack pre-mounted; `/healthz`, `/readyz`, `/health` auto-registered; `WithHealthChecks` / `AddReadyCheck` for /readyz integration |
 | `server/grpc`     | gRPC server with interceptor chain, health check service, and optional TLS/mTLS                                            |
 | `middleware/http` | RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler, CORS, RateLimit, IPFilter, BodyLimit, Timeout                 |
 | `middleware/grpc` | UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler, UnaryRateLimit, UnaryIPFilter, UnaryTimeout   |
+| `tracing`         | OpenTelemetry OTLP trace provider; implements `app.Lifecycle`; no-op when endpoint is unset                                |
+| `metric`          | OTel metrics with Prometheus and OTLP exporters; implements `app.Lifecycle`; automatic HTTP/gRPC instrumentation           |
 | `database`        | GORM connection manager for MySQL, Postgres, SQLite; SQL tracing; goose migrations; `*Manager` implements `app.Migrator`; `CloseAll() error`; `Manager.HealthChecker(connName)` |
 | `cache`           | `Cache` interface; `Manager` holds named backends (memory/Redis); `Manager` implements `app.Closer`; `Manager.HealthChecker(backendName)` |
 | `httpclient`      | Outbound HTTP with OTel tracing, exponential-backoff retry, and named registry; `Register(name, *Client)` / `Replace` / `CloseAll() error` |
 | `grpcclient`      | Outbound gRPC with OTel tracing, per-call retry, named registry; `Register(name, *ClientConn)` / `Replace`; `Registry` implements `app.Closer` |
 | `lock`            | Redis distributed lock; atomic Lua acquire/release; optional auto-renew and wait-with-timeout                              |
-| `cron`            | Cron scheduler (`core.Server`); per-job retry, timeout, skip-if-running, sub-second tickers                                |
-| `event`           | In-process pub/sub `Bus`; synchronous default, optional async; no package-level state                                      |
 | `stream`          | Redis Streams pub/sub `Bus`; work-queue (`WithGroup`) and broadcast (`WithBroadcast`) modes                                |
-| `auth`            | JWT signing/verification; `Required`/`Optional` gin middleware; typed claims via generics                                  |
-| `validate`        | go-playground/validator binding; structured 400 errors with field-level metadata                                           |
-| `pagination`      | Page-number `Params` and typed `Result[T]` envelope for list endpoints                                                     |
-| `circuitbreaker`  | Circuit breaker (Closed → Open → HalfOpen); `Execute(ctx, fn)`                                                             |
+| `cron`            | Cron scheduler (`core.Server`); per-job retry, timeout, skip-if-running, sub-second tickers                                |
 | `storage`         | Unified object storage interface for AWS S3, Alibaba OSS, and Tencent COS; `Register(name, Storage)` / `Replace` / `CloseAll() error` |
-| `notify`          | Multi-channel notifications: Email (SMTP), SMS (Aliyun), DingTalk, WeCom, Feishu                                           |
-| `pprof`           | pprof endpoints; standalone `core.Server` or mounted on an existing gin.Engine                                             |
-| `idgen`           | Snowflake ID generator + ULID; `New()` → `Register("name", gen)` → `Get("name").Next()`; `CloseAll() error` (no-op, clears registry) |
-| `ratelimit`       | `Limiter` interface; in-process token-bucket or Redis fixed-window; backs HTTP/gRPC middleware                             |
-| `testutil`        | Test helpers: `FreePort`, `NewConfig` (stub `core.Config`), `NewLogger` (writes to `t.Log`)                                |
+
+### Opinionated Extensions
+
+| Package          | Description                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------- |
+| `auth`           | JWT signing/verification; `Required`/`Optional` gin middleware; typed claims via generics                      |
+| `validate`       | go-playground/validator binding; structured 400 errors with field-level metadata                               |
+| `pagination`     | Page-number `Params` and typed `Result[T]` envelope for list endpoints                                         |
+| `ratelimit`      | `Limiter` interface; in-process token-bucket or Redis fixed-window; backs HTTP/gRPC middleware                 |
+| `circuitbreaker` | Circuit breaker (Closed → Open → HalfOpen); `Execute(ctx, fn)`                                                 |
+| `notify`         | Multi-channel notifications: Email (SMTP), SMS (Aliyun), DingTalk, WeCom, Feishu                               |
+| `idgen`          | Snowflake ID generator + ULID; `New()` → `Register("name", gen)` → `Get("name").Next()`; `CloseAll() error` (no-op, clears registry) |
+| `pprof`          | pprof endpoints; standalone `core.Server` or mounted on an existing gin.Engine                                 |
+
+### Developer Utilities
+
+| Package    | Description                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| `event`    | In-process pub/sub `Bus`; synchronous default, optional async; no package-level state            |
+| `testutil` | Test helpers: `FreePort`, `NewConfig` (stub `core.Config`), `NewLogger` (writes to `t.Log`)      |
 
 ## Installation
 
