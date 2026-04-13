@@ -110,11 +110,11 @@ func main() {
 	)
 
 	// ── HTTP Client ───────────────────────────────────────────────────────
-	httpclient.Register("jsonplaceholder",
+	httpclient.Register("jsonplaceholder", httpclient.New( //nolint:errcheck
 		httpclient.WithBaseURL("https://jsonplaceholder.typicode.com"),
 		httpclient.WithTimeout(10*time.Second),
 		httpclient.WithRetry(2),
-	)
+	))
 
 	// ── Storage (S3/OSS/COS — only when credentials are set) ─────────────
 	if cfg.GetString("storage.access_key") != "" {
@@ -215,9 +215,16 @@ func main() {
 	}
 
 	// ── HTTP Server ───────────────────────────────────────────────────────
+	// Health checkers are wired directly into the HTTP server via WithHealthChecks.
+	// Each checker is registered as a named /readyz sub-check: database:default
+	// performs SELECT 1 and cache:default verifies the memory backend is present.
 	httpSrv, err := httpserver.New(
 		httpserver.WithConfig(cfg),
 		httpserver.WithLogger(log),
+		httpserver.WithHealthChecks(
+			dbMgr.HealthChecker("default"),
+			cacheMgr.HealthChecker("default"),
+		),
 	)
 	if err != nil {
 		log.Error(context.Background(), "http server init failed", logger.F("err", err))
