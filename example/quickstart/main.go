@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 
@@ -28,8 +29,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Bind to a random port to avoid conflicts in development.
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listen: %v\n", err)
+		os.Exit(1)
+	}
+	log.Info(context.Background(), "quickstart listening", logger.F("addr", ln.Addr().String()))
+
 	srv, err := httpserver.New(
 		httpserver.WithConfig(cfg),
+		httpserver.WithListener(ln),
 		httpserver.WithLogger(log),
 	)
 	if err != nil {
