@@ -26,16 +26,16 @@ func newSMSSender(cfg SMSConfig) *smsSender {
 	return &smsSender{cfg: cfg}
 }
 
-func (s *smsSender) send(_ context.Context, msg Message) error {
+func (s *smsSender) send(ctx context.Context, msg Message) error {
 	for _, phone := range msg.To {
-		if err := s.sendOne(phone, msg.Body); err != nil {
+		if err := s.sendOne(ctx, phone, msg.Body); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *smsSender) sendOne(phone, templateParam string) error {
+func (s *smsSender) sendOne(ctx context.Context, phone, templateParam string) error {
 	params := map[string]string{
 		"AccessKeyId":      s.cfg.AccessKey,
 		"Action":           "SendSms",
@@ -72,7 +72,11 @@ func (s *smsSender) sendOne(phone, templateParam string) error {
 
 	finalURL := "https://dysmsapi.aliyuncs.com/?" + query + "&Signature=" + url.QueryEscape(sig)
 
-	resp, err := http.Get(finalURL) //nolint:noctx
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, finalURL, nil)
+	if err != nil {
+		return fmt.Errorf("notify/sms: build request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("notify/sms: request: %w", err)
 	}

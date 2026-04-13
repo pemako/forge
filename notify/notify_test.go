@@ -156,3 +156,25 @@ func TestWebhook_httpError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "500")
 }
+
+func TestSMSSend_CancelledContext_ReturnsError(t *testing.T) {
+	n, err := notify.New(notify.WithSMS(notify.SMSConfig{
+		AccessKey:    "test-key",
+		SecretKey:    "test-secret",
+		SignName:     "test",
+		TemplateCode: "SMS_123",
+	}))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	err = n.Send(ctx, notify.Message{
+		To:       []string{"13800000000"},
+		Body:     `{"code":"1234"}`,
+		Channels: []notify.Channel{notify.SMS},
+	})
+	// Should fail because context is cancelled
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
