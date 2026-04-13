@@ -53,3 +53,23 @@ func TestGauge_doesNotPanic(t *testing.T) {
 		metric.GaugeSub(ctx, "test_conn", 1)
 	})
 }
+
+func TestNew_ReturnsProvider(t *testing.T) {
+	p, err := metric.New()
+	require.NoError(t, err)
+	require.NotNil(t, p)
+}
+
+func TestProvider_Init_Idempotent(t *testing.T) {
+	p1, _ := metric.New()
+	p2, _ := metric.New()
+	require.NoError(t, p1.Init(context.Background()))
+	require.NotPanics(t, func() { p2.Init(context.Background()) }) //nolint:errcheck
+}
+
+func TestProvider_Shutdown(t *testing.T) {
+	p, _ := metric.New()
+	p.Init(context.Background()) //nolint:errcheck
+	require.NoError(t, p.Shutdown(context.Background()))
+}
+

@@ -26,13 +26,21 @@ func toAttrs(labels []LabelOption) []attribute.KeyValue {
 	return attrs
 }
 
+func noopMeter() otelmetric.Meter {
+	return noop.NewMeterProvider().Meter("")
+}
+
 // getMeter returns the global meter or a noop if Init() not called.
 // Uses boolean flag — otelmetric.Meter zero-value comparison is unsafe.
 func getMeter() otelmetric.Meter {
-	if !initialized {
-		return noop.NewMeterProvider().Meter("")
+	globalMu.Lock()
+	init := initialized
+	m := globalMeter
+	globalMu.Unlock()
+	if !init {
+		return noopMeter()
 	}
-	return globalMeter
+	return m
 }
 
 // Count increments the named integer counter by n. The counter is created on
