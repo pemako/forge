@@ -70,7 +70,9 @@ func WithLogger(l core.Logger) Option {
 	return func(b *Bus) { b.log = l }
 }
 
-// New creates a new Bus with the given options.
+// New creates a Bus with the given options. Unlike most infrastructure packages,
+// New does not return an error because event.Bus has no external dependencies —
+// no network connections, no I/O, no initialization that can fail.
 // Use New instead of the default bus when you need isolated topic namespaces,
 // custom async/logger settings, or deterministic teardown (e.g., in tests).
 func New(opts ...Option) *Bus {

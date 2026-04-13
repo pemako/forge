@@ -1,48 +1,15 @@
-// Package storage provides a unified interface for object storage backends.
-// Supported providers: Amazon S3 (and S3-compatible services), Alibaba Cloud
-// OSS, and Tencent Cloud COS.
+// Package storage provides a unified object storage interface for AWS S3,
+// Alibaba OSS, and Tencent COS.
 //
-// Create a Storage with New, selecting the provider via WithProvider (or
-// WithConfig to read settings from a core.Config). Use Register to store named
-// instances in the global registry and Get to retrieve them later — the same
-// pattern used by the database, cache, and httpclient packages.
+// # Instance-first usage (recommended)
 //
-// The Storage interface covers the most common operations: Upload, Download,
-// Delete, Exists, and PresignURL. Each Upload call can be further configured
-// with UploadOption values (see WithContentType, WithMetadata).
+//	s, err := storage.New(storage.WithS3(cfg))
+//	// Inject s directly into services that need it.
 //
-// Example (direct):
+// # Registry usage (convenience for small services)
 //
-//	store, err := storage.New(
-//	    storage.WithProvider("s3"),
-//	    storage.WithRegion("us-east-1"),
-//	    storage.WithBucket("my-bucket"),
-//	    storage.WithAccessKey("AKID", "secret"),
-//	)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	publicURL, err := store.Upload(ctx, "avatars/user-1.jpg", reader,
-//	    storage.WithContentType("image/jpeg"),
-//	)
-//	presigned, err := store.PresignURL(ctx, "avatars/user-1.jpg", time.Hour)
-//
-// Example (named registry):
-//
-//	// At startup:
-//	store, err := storage.New(
-//	    storage.WithProvider("oss"),
-//	    storage.WithEndpoint("https://oss-cn-hangzhou.aliyuncs.com"),
-//	    storage.WithBucket("my-bucket"),
-//	    storage.WithAccessKey("key", "secret"),
-//	)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	_ = storage.Register("avatars", store)
-//
-//	// Elsewhere in the application:
-//	store := storage.Get("avatars")
+//	storage.Register("avatars", s)
+//	s := storage.Get("avatars")
 package storage
 
 import (

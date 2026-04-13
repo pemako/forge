@@ -1,22 +1,16 @@
-// Package cache provides a unified caching abstraction with in-memory and
-// Redis backends. The in-memory backend is the default and requires no
-// external dependencies. The Redis backend is optional and configured via
-// WithRedis or WithConfig.
+// Package cache provides a unified cache abstraction with in-memory and Redis
+// backends. Backends are grouped in a Manager; multiple named Managers can be
+// registered for global access.
 //
-// A package-level registry stores named Manager instances. All instances that
-// need Redis share the connection through a Manager's RedisClient method, which
-// is also used by the lock and stream packages.
+// # Instance-first usage (recommended)
 //
-// Example:
+//	mgr, err := cache.New(cache.WithMemory("default"), cache.WithRedis("redis", addr))
+//	cache.Register("default", mgr)        // optional global access
+//	c := mgr.Client("default")            // instance access
 //
-//	mgr, err := cache.New(
-//	    cache.WithMemory("default"),
-//	    cache.WithRedis("redis", "redis:6379"),
-//	)
-//	if err != nil { ... }
-//	cache.Register("default", mgr)
-//	c := cache.Client("default")
-//	c.Set(ctx, "key", "value", time.Hour)
+// # Convenience access (small services)
+//
+//	c := cache.Client("default")          // delegates to Get("default").Client("default")
 package cache
 
 import (

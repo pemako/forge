@@ -71,15 +71,38 @@ These retain package-level helpers to break import cycles or serve genuinely sta
 
 ## 4. Registry Semantics
 
-All named registry packages follow this contract:
+All named registry packages follow a two-tier contract:
+
+### Base contract (all packages)
 
 | Function | Behavior |
 |----------|----------|
 | `Register(name, instance)` | Returns `ErrAlreadyRegistered` if name exists; does NOT overwrite |
 | `Replace(name, instance)` | Closes old resource (if any), stores new instance |
 | `Get(name)` | Returns nil if not found |
-| `CloseAll() error` | Closes all resources, clears registry |
-| `reset()` (unexported) | Clears registry for test isolation; `_test.go` only |
+| `CloseAll() error` | Releases resources (if any) and clears the registry; returns nil for resource-free packages |
+
+> **`Register` always accepts a pre-built instance, never options.** Create the instance
+> with `New()` first, then pass it to `Register`. This makes construction errors explicit
+> and separates the "build" step from the "register" step.
+
+### Optional extensions (package-specific)
+
+| Function | Provided by |
+|----------|------------|
+| `CloseBackend(name string) error` | `cache.Manager` (close a single backend) |
+| `Close() error` (implements `app.Closer`) | `cache.Manager`, `grpcclient.Registry` |
+| `HealthChecker(name string) core.HealthChecker` | `database.Manager`, `cache.Manager` |
+
+### Why `Close(name)` is NOT part of the base contract
+
+Single-entry close has inconsistent semantics across packages:
+- `database` manages a whole Manager (multiple connections) per registry entry
+- `cache` manages a whole Manager (multiple backends) per registry entry
+- `storage`/`idgen` have no connections to close at all
+
+Using `Replace` to swap out an entry is the standard pattern when a single
+entry needs to be refreshed. `CloseAll()` handles full teardown.
 
 Registry packages: `database`, `cache`, `httpclient`, `grpcclient`, `storage`, `idgen`
 

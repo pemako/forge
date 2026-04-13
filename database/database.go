@@ -1,3 +1,15 @@
+// Package database provides a GORM-based connection manager for MySQL, PostgreSQL,
+// and SQLite, with goose migrations and optional SQL tracing.
+//
+// # Instance-first usage (recommended)
+//
+//	mgr, err := database.New(database.WithConfig(cfg))
+//	database.Register("default", mgr)    // optional global access
+//	db := mgr.DB("default")              // instance access
+//
+// # Convenience access (small services)
+//
+//	db := database.DB("default")         // delegates to Get("default").DB("default")
 package database
 
 import (

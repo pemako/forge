@@ -1,5 +1,15 @@
-// Package httpclient/client.go
-// Core Client implementation, named registry, and Init helper.
+// Package httpclient provides an outbound HTTP client with OTel tracing and
+// exponential-backoff retry.
+//
+// # Instance-first usage (recommended)
+//
+//	c := httpclient.New(httpclient.WithBaseURL("https://api.example.com"))
+//	// Inject c directly into services that need it.
+//
+// # Registry usage (convenience for small services)
+//
+//	httpclient.Register("payments", httpclient.New(httpclient.WithBaseURL(...)))
+//	c := httpclient.Get("payments")
 package httpclient
 
 import (

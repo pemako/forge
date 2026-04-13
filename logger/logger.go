@@ -179,12 +179,26 @@ func (l *zapLogger) With(fields ...core.Field) core.Logger {
 // _default is the process-wide logger, initialized to a no-op.
 var _default core.Logger = &zapLogger{z: zap.NewNop()}
 
-// SetDefault installs log as the process-wide default logger.
-// Call this once during application startup after constructing a logger with New.
+// SetDefault sets the package-level default logger used as a fallback when no
+// logger is explicitly injected. Call this once at application startup in main()
+// after creating the logger with New.
+//
+// In application and infrastructure packages, prefer constructor injection over
+// calling Default() at call sites:
+//
+//	// Preferred
+//	func New(opts ...Option) *T {
+//	    o := defaultOptions() // uses logger.Default() as fallback
+//	}
+//
+//	// Avoid in business logic
+//	logger.Default().Info(ctx, "something")
 func SetDefault(log core.Logger) { _default = log }
 
-// Default returns the process-wide default logger.
-// The default is a no-op logger until SetDefault is called.
+// Default returns the package-level default logger set by SetDefault.
+// It serves as a fallback for packages that have not been given an explicit
+// logger via constructor injection. Do not use as a general-purpose global
+// logger in business logic; prefer constructor injection.
 func Default() core.Logger { return _default }
 
 // Debug logs a message at DEBUG level using the default logger.

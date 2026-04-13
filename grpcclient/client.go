@@ -1,5 +1,15 @@
-// Package grpcclient/client.go
-// Dial, named registry, and Init for the grpcclient package.
+// Package grpcclient provides outbound gRPC connections with OTel tracing and
+// per-call retry.
+//
+// # Instance-first usage (recommended)
+//
+//	conn, err := grpcclient.Dial("users:9090", grpcclient.WithRetry(3))
+//	svc := pb.NewUsersClient(conn)
+//
+// # Registry usage (convenience for small services)
+//
+//	grpcclient.Register("users", conn)
+//	conn := grpcclient.Get("users")
 package grpcclient
 
 import (

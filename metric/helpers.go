@@ -9,6 +9,16 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 )
 
+// The functions in this file are convenience facades over the default metric
+// Provider. The default Provider must be initialized via metric.Init() or
+// app.WithLifecycle(provider) before any of these functions are called.
+//
+// For tests or scenarios requiring multiple providers, use [Provider] directly:
+//
+//	p, _ := metric.New(opts...)
+//	p.Init(ctx)
+//	meter := p.Meter() // use OTel instruments directly
+
 // LabelOption is a key-value label (attribute) attached to a metric recording.
 // Use the Label constructor to create one.
 type LabelOption struct{ k, v string }
@@ -43,36 +53,41 @@ func getMeter() otelmetric.Meter {
 	return m
 }
 
-// Count increments the named integer counter by n. The counter is created on
-// first use. If Init has not been called, this is a no-op.
+// Count is a convenience facade that delegates to the default metric Provider.
+// It increments the named integer counter by n. The counter is created on first
+// use. If Init has not been called, this is a no-op.
 func Count(ctx context.Context, name string, n int64, labels ...LabelOption) {
 	c, _ := getMeter().Int64Counter(name)
 	c.Add(ctx, n, otelmetric.WithAttributes(toAttrs(labels)...))
 }
 
-// Gauge sets the named float64 up-down counter to value. Use this for
-// metrics that can increase or decrease (e.g., active connections, queue depth).
+// Gauge is a convenience facade that delegates to the default metric Provider.
+// It sets the named float64 up-down counter to value. Use this for metrics that
+// can increase or decrease (e.g., active connections, queue depth).
 // If Init has not been called, this is a no-op.
 func Gauge(ctx context.Context, name string, value float64, labels ...LabelOption) {
 	g, _ := getMeter().Float64UpDownCounter(name)
 	g.Add(ctx, value, otelmetric.WithAttributes(toAttrs(labels)...))
 }
 
-// GaugeAdd adds delta to the named float64 up-down counter.
+// GaugeAdd is a convenience facade that delegates to the default metric Provider.
+// It adds delta to the named float64 up-down counter.
 // If Init has not been called, this is a no-op.
 func GaugeAdd(ctx context.Context, name string, delta float64, labels ...LabelOption) {
 	g, _ := getMeter().Float64UpDownCounter(name)
 	g.Add(ctx, delta, otelmetric.WithAttributes(toAttrs(labels)...))
 }
 
-// GaugeSub subtracts delta from the named float64 up-down counter.
+// GaugeSub is a convenience facade that delegates to the default metric Provider.
+// It subtracts delta from the named float64 up-down counter.
 // It is equivalent to GaugeAdd(ctx, name, -delta, labels...).
 func GaugeSub(ctx context.Context, name string, delta float64, labels ...LabelOption) {
 	GaugeAdd(ctx, name, -delta, labels...)
 }
 
-// StartTimer returns a function that, when called, records the elapsed time
-// since StartTimer was called in the histogram named "<name>_duration_seconds".
+// StartTimer is a convenience facade that delegates to the default metric Provider.
+// It returns a function that, when called, records the elapsed time since
+// StartTimer was called in the histogram named "<name>_duration_seconds".
 // Use the returned function as a deferred call to measure function duration:
 //
 //	defer metric.StartTimer(ctx, "db_query", metric.Label("op", "select"))()
@@ -84,7 +99,8 @@ func StartTimer(ctx context.Context, name string, labels ...LabelOption) func() 
 	}
 }
 
-// Duration records a pre-measured duration d in the histogram named
+// Duration is a convenience facade that delegates to the default metric Provider.
+// It records a pre-measured duration d in the histogram named
 // "<name>_duration_seconds". Use this when the duration is already known
 // rather than measuring it inline with StartTimer.
 func Duration(ctx context.Context, name string, d time.Duration, labels ...LabelOption) {
