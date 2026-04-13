@@ -77,9 +77,9 @@ Split into additional files only when a single file exceeds ~300 lines.
 // newpkg/options.go
 
 type options struct {
-    cfg    core.Config
-    log    core.Logger
-    // package-specific fields ...
+  cfg    core.Config
+  log    core.Logger
+  // package-specific fields ...
 }
 
 type Option func(*options)
@@ -87,21 +87,21 @@ type Option func(*options)
 // WithConfig reads package settings from cfg under the "newpkg.*" key prefix.
 // Explicit options applied after WithConfig override config values.
 func WithConfig(cfg core.Config) Option {
-    return func(o *options) {
-        o.cfg = cfg
-        if v := cfg.GetString("newpkg.xxx"); v != "" {
-            o.xxx = v
-        }
+  return func(o *options) {
+    o.cfg = cfg
+    if v := cfg.GetString("newpkg.xxx"); v != "" {
+      o.xxx = v
     }
+  }
 }
 
 // WithLogger sets the logger. Defaults to logger.Default() when not provided.
 func WithLogger(l core.Logger) Option {
-    return func(o *options) { o.log = l }
+  return func(o *options) { o.log = l }
 }
 
 func defaultOptions() options {
-    return options{log: logger.Default()}
+  return options{log: logger.Default()}
 }
 ```
 
@@ -111,12 +111,12 @@ func defaultOptions() options {
 // New creates a Xxx with the given options.
 // Returns an error if required configuration (e.g. address) is missing.
 func New(opts ...Option) (*Xxx, error) {
-    o := defaultOptions()
-    for _, opt := range opts {
-        opt(&o)
-    }
-    // validate required fields here
-    return &Xxx{opts: o}, nil
+  o := defaultOptions()
+  for _, opt := range opts {
+    opt(&o)
+  }
+  // validate required fields here
+  return &Xxx{opts: o}, nil
 }
 ```
 
@@ -125,44 +125,44 @@ func New(opts ...Option) (*Xxx, error) {
 ```go
 var ErrAlreadyRegistered = errors.Define(409, "NEWPKG_ALREADY_REGISTERED", "already registered")
 var (
-    registry   = map[string]*Xxx{}
-    registryMu sync.RWMutex
+  registry   = map[string]*Xxx{}
+  registryMu sync.RWMutex
 )
 
 // Register stores x under name. Returns ErrAlreadyRegistered if name is taken.
 func Register(name string, x *Xxx) error {
-    registryMu.Lock()
-    defer registryMu.Unlock()
-    if _, ok := registry[name]; ok {
-        return ErrAlreadyRegistered
-    }
-    registry[name] = x
-    return nil
+  registryMu.Lock()
+  defer registryMu.Unlock()
+  if _, ok := registry[name]; ok {
+    return ErrAlreadyRegistered
+  }
+  registry[name] = x
+  return nil
 }
 
 // Replace stores x under name, closing and releasing the old instance first.
 func Replace(name string, x *Xxx) error {
-    registryMu.Lock()
-    old := registry[name]
-    registry[name] = x
-    registryMu.Unlock()
-    if old != nil {
-        old.Close() //nolint:errcheck
-    }
-    return nil
+  registryMu.Lock()
+  old := registry[name]
+  registry[name] = x
+  registryMu.Unlock()
+  if old != nil {
+    old.Close() //nolint:errcheck
+  }
+  return nil
 }
 
 func Get(name string) *Xxx {
-    registryMu.RLock()
-    defer registryMu.RUnlock()
-    return registry[name]
+  registryMu.RLock()
+  defer registryMu.RUnlock()
+  return registry[name]
 }
 
 // reset clears the registry. For use in tests only (_test.go).
 func reset() {
-    registryMu.Lock()
-    clear(registry)
-    registryMu.Unlock()
+  registryMu.Lock()
+  clear(registry)
+  registryMu.Unlock()
 }
 ```
 
@@ -170,15 +170,15 @@ func reset() {
 
 ```go
 func (x *Xxx) Start(_ context.Context) error {
-    // start background work
-    <-x.done          // block until Stop is called
-    return nil
+  // start background work
+  <-x.done          // block until Stop is called
+  return nil
 }
 
 func (x *Xxx) Stop(ctx context.Context) error {
-    close(x.done)
-    // wait for in-flight work with ctx deadline
-    return nil
+  close(x.done)
+  // wait for in-flight work with ctx deadline
+  return nil
 }
 ```
 
@@ -186,8 +186,8 @@ func (x *Xxx) Stop(ctx context.Context) error {
 
 ```go
 var (
-    ErrNotFound = errors.Define(404, "NEWPKG_NOT_FOUND", "resource not found")
-    ErrConflict = errors.Define(409, "NEWPKG_CONFLICT", "resource conflict")
+  ErrNotFound = errors.Define(404, "NEWPKG_NOT_FOUND", "resource not found")
+  ErrConflict = errors.Define(409, "NEWPKG_CONFLICT", "resource conflict")
 )
 ```
 
@@ -221,75 +221,75 @@ addr := ln.Addr().String()
 
 ```
 core/            ← interfaces only (Logger, Config, Server, Provider, HealthChecker) — zero deps on other mk packages
-                    core.HealthChecker: Name() string / Check(ctx context.Context) error
+          core.HealthChecker: Name() string / Check(ctx context.Context) error
 errors/          ← CodedError (HTTP code + reason + cause chain), sentinel vars
 config/          ← viper implementation of core.Config
 logger/          ← zap + lumberjack; per-level log files; sensitive field masking
 app/             ← lifecycle manager: Migrator.Up → Lifecycle.Init → BeforeStart → Server.Start → signal
-                    → Server.Stop → Lifecycle.Shutdown (reverse) → Closer.Close → AfterStop
-                    Options: WithLifecycle(components...) / WithCloser(closers...)
-                    Interfaces: Lifecycle{Init,Shutdown}, Closer{Close}, Migrator{Up}
-                    WithHealthCheck(checkers ...core.HealthChecker) / HealthCheckers() []core.HealthChecker
+          → Server.Stop → Lifecycle.Shutdown (reverse) → Closer.Close → AfterStop
+          Options: WithLifecycle(components...) / WithCloser(closers...)
+          Interfaces: Lifecycle{Init,Shutdown}, Closer{Close}, Migrator{Up}
+          WithHealthCheck(checkers ...core.HealthChecker) / HealthCheckers() []core.HealthChecker
 server/http/     ← gin server implementing core.Server; auto-mounts default middleware stack:
-                    RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler
-                    Do NOT re-add these middlewares manually — causes duplicate responses
-                    WithHealthChecks(...core.HealthChecker) — registers /readyz probes at construction
-                    AddReadyCheck(name, fn) — add /readyz probe after construction
+          RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler
+          Do NOT re-add these middlewares manually — causes duplicate responses
+          WithHealthChecks(...core.HealthChecker) — registers /readyz probes at construction
+          AddReadyCheck(name, fn) — add /readyz probe after construction
 server/grpc/     ← gRPC server implementing core.Server; auto-chains interceptors
 middleware/http/ ← RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler
-                    + optional: CORS, Timeout, BodyLimit, RateLimit, IPFilter
+          + optional: CORS, Timeout, BodyLimit, RateLimit, IPFilter
 middleware/grpc/ ← UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler
-                    + optional: UnaryTimeout, UnaryRateLimit, UnaryIPFilter
+          + optional: UnaryTimeout, UnaryRateLimit, UnaryIPFilter
 database/        ← gorm multi-driver (mysql/postgres/sqlite); SQL tracing plugin; goose migrations
-                    database.New() → *Manager (no global side effects)
-                    database.Register("name", mgr) / database.Get("name") / database.DB("conn")
-                    database.CloseAll() error — closes and releases all registered managers
-                    *Manager implements app.Migrator; Manager.Close() releases all connections
-                    Manager.HealthChecker(connName) core.HealthChecker — probes SELECT 1
+          database.New() → *Manager (no global side effects)
+          database.Register("name", mgr) / database.Get("name") / database.DB("conn")
+          database.CloseAll() error — closes and releases all registered managers
+          *Manager implements app.Migrator; Manager.Close() releases all connections
+          Manager.HealthChecker(connName) core.HealthChecker — probes SELECT 1
 cache/           ← Cache interface; Manager holds named backends (memory/Redis)
-                    cache.New() → *Manager (no global side effects)
-                    cache.Register("name", mgr) / cache.Client("name") / cache.RedisClient("name")
-                    *Manager implements app.Closer; Manager.CloseBackend("name") / Manager.CloseAll()
-                    Manager.HealthChecker(backendName) core.HealthChecker — memory: always healthy; redis: PING
+          cache.New() → *Manager (no global side effects)
+          cache.Register("name", mgr) / cache.Client("name") / cache.RedisClient("name")
+          *Manager implements app.Closer; Manager.CloseBackend("name") / Manager.CloseAll()
+          Manager.HealthChecker(backendName) core.HealthChecker — memory: always healthy; redis: PING
 httpclient/      ← outbound HTTP; otelhttp tracing; exponential-backoff retry; named registry
-                    client, err := httpclient.New(opts...) — create instance
-                    httpclient.Register("name", client) / httpclient.Replace("name", client) / httpclient.Get("name")
-                    httpclient.CloseAll() error — closes and clears all registered clients
+          client, err := httpclient.New(opts...) — create instance
+          httpclient.Register("name", client) / httpclient.Replace("name", client) / httpclient.Get("name")
+          httpclient.CloseAll() error — closes and clears all registered clients
 grpcclient/      ← outbound gRPC; otelgrpc; retry interceptor; named registry; grpc.NewClient
-                    conn, err := grpcclient.Dial(target, opts...) — create connection
-                    grpcclient.Register("name", conn) / grpcclient.Replace("name", conn) / grpcclient.Get("name")
-                    grpcclient.NewRegistry() implements app.Closer (calls CloseAll on shutdown)
+          conn, err := grpcclient.Dial(target, opts...) — create connection
+          grpcclient.Register("name", conn) / grpcclient.Replace("name", conn) / grpcclient.Get("name")
+          grpcclient.NewRegistry() implements app.Closer (calls CloseAll on shutdown)
 lock/            ← Redis distributed lock; Lua atomic acquire/release; optional auto-renew
 cron/            ← robfig/cron scheduler implementing core.Server; WithDistributedLock option
 event/           ← in-process pub/sub; Bus struct only — no package-level state
-                    bus := event.New() / bus.Subscribe / bus.Publish / bus.Unsubscribe
-                    event.New(event.WithAsync()) for async delivery
+          bus := event.New() / bus.Subscribe / bus.Publish / bus.Unsubscribe
+          event.New(event.WithAsync()) for async delivery
 stream/          ← Redis Streams pub/sub; Bus struct only — no package-level state
-                    bus, err := stream.New(redisClient, opts...) — returns error if client is nil
-                    bus.Subscribe(topic, stream.WithGroup(...), stream.WithHandler(...))
-                    bus.Subscribe(topic, stream.WithBroadcast(), stream.WithHandler(...))
-                    app.WithServer(bus.Worker()) — Worker implements core.Server
+          bus, err := stream.New(redisClient, opts...) — returns error if client is nil
+          bus.Subscribe(topic, stream.WithGroup(...), stream.WithHandler(...))
+          bus.Subscribe(topic, stream.WithBroadcast(), stream.WithHandler(...))
+          app.WithServer(bus.Worker()) — Worker implements core.Server
 tracing/         ← OTel OTLP provider; implements core.Provider and app.Lifecycle
-                    tracing.New() → *Provider; Init() is no-op; Shutdown() flushes spans
+          tracing.New() → *Provider; Init() is no-op; Shutdown() flushes spans
 metric/          ← Prometheus + OTLP; implements app.Lifecycle
-                    metric.New() → *Provider; p.Init(ctx) starts exporters + wires middleware hooks
-                    metric.Count / Gauge / StartTimer — package-level facade (idempotent sync.Once wiring)
+          metric.New() → *Provider; p.Init(ctx) starts exporters + wires middleware hooks
+          metric.Count / Gauge / StartTimer — package-level facade (idempotent sync.Once wiring)
 auth/            ← JWT signing/verification; Required/Optional gin middleware; FromContext[T]
 validate/        ← go-playground/validator; BindJSON/BindForm/BindQuery/BindURI helpers
 pagination/      ← Params, Result[T], FromQuery, Offset, New[T]
 circuitbreaker/  ← three-state circuit breaker (Closed/Open/HalfOpen); Execute(ctx, fn)
 storage/         ← Storage interface; S3 / Alibaba OSS / Tencent COS backends
-                    s, err := storage.New(opts...) — create instance
-                    storage.Register("name", s) / storage.Replace("name", s) / storage.Get("name")
-                    storage.CloseAll() error — clears all registered backends
+          s, err := storage.New(opts...) — create instance
+          storage.Register("name", s) / storage.Replace("name", s) / storage.Get("name")
+          storage.CloseAll() error — clears all registered backends
 notify/          ← Email(SMTP) / SMS(Aliyun) / DingTalk / WeCom / Feishu notification channels
 pprof/           ← pprof profiling endpoints; standalone server (core.Server) or Register on gin.Engine
 idgen/           ← Snowflake ID generator + ULID
-                    gen, err := idgen.New(idgen.WithWorkerID(n)) — warns if worker_id not set explicitly
-                    idgen.Register("name", gen) / idgen.Get("name").Next() / idgen.Get("name").NextString()
-                    idgen.CloseAll() error — no-op (no connections to close), clears registry
-                    idgen.ULID() — time-sortable string, no registration needed
-                    Production: always set idgen.worker_id in config (IP-derived default is unstable in containers)
+          gen, err := idgen.New(idgen.WithWorkerID(n)) — warns if worker_id not set explicitly
+          idgen.Register("name", gen) / idgen.Get("name").Next() / idgen.Get("name").NextString()
+          idgen.CloseAll() error — no-op (no connections to close), clears registry
+          idgen.ULID() — time-sortable string, no registration needed
+          Production: always set idgen.worker_id in config (IP-derived default is unstable in containers)
 testutil/        ← test helpers: FreePort, NewConfig (stub core.Config), NewLogger (writes to t.Log)
 ratelimit/       ← Limiter interface; in-process token-bucket or distributed Redis fixed-window; used by middleware
 ```
@@ -368,10 +368,10 @@ Every log call receives `ctx`. The logger extracts `trace_id` / `span_id` automa
 ```yaml
 cache:
   default:
-    backend: memory          # regular caching
+  backend: memory          # regular caching
   redis:
-    backend: redis           # shared for lock + stream
-    addr: "redis:6379"
+  backend: redis           # shared for lock + stream
+  addr: "redis:6379"
 ```
 
 ```go

@@ -75,48 +75,48 @@ Requires Go 1.26 or later.
 package main
 
 import (
-    "context"
-    "os"
+  "context"
+  "os"
 
-    "github.com/pemako/mk/app"
-    "github.com/pemako/mk/config"
-    "github.com/pemako/mk/logger"
-    "github.com/pemako/mk/metric"
-    grpcserver "github.com/pemako/mk/server/grpc"
-    httpserver "github.com/pemako/mk/server/http"
-    "github.com/pemako/mk/tracing"
+  "github.com/pemako/mk/app"
+  "github.com/pemako/mk/config"
+  "github.com/pemako/mk/logger"
+  "github.com/pemako/mk/metric"
+  grpcserver "github.com/pemako/mk/server/grpc"
+  httpserver "github.com/pemako/mk/server/http"
+  "github.com/pemako/mk/tracing"
 )
 
 func main() {
-    cfg, _ := config.Load(config.WithFile("config.yaml"), config.WithEnv("APP"))
-    log, _ := logger.New(logger.WithConfig(cfg))
-    logger.SetDefault(log)
+  cfg, _ := config.Load(config.WithFile("config.yaml"), config.WithEnv("APP"))
+  log, _ := logger.New(logger.WithConfig(cfg))
+  logger.SetDefault(log)
 
-    // tracing.Provider and metric.Provider implement app.Lifecycle:
-    // Init() is called before servers start, Shutdown() after they stop.
-    tracingProvider, _ := tracing.New(tracing.WithConfig(cfg), tracing.WithLogger(log))
-    metricProvider, _ := metric.New(metric.WithConfig(cfg))
+  // tracing.Provider and metric.Provider implement app.Lifecycle:
+  // Init() is called before servers start, Shutdown() after they stop.
+  tracingProvider, _ := tracing.New(tracing.WithConfig(cfg), tracing.WithLogger(log))
+  metricProvider, _ := metric.New(metric.WithConfig(cfg))
 
-    httpSrv, _ := httpserver.New(httpserver.WithConfig(cfg), httpserver.WithLogger(log))
-    grpcSrv, _ := grpcserver.New(grpcserver.WithConfig(cfg), grpcserver.WithLogger(log))
+  httpSrv, _ := httpserver.New(httpserver.WithConfig(cfg), httpserver.WithLogger(log))
+  grpcSrv, _ := grpcserver.New(grpcserver.WithConfig(cfg), grpcserver.WithLogger(log))
 
-    // Register routes on httpSrv.Engine() and gRPC services on grpcSrv.Server().
-    // httpserver.New already mounts: RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler.
-    // Do NOT call r.Use(mw.ErrorHandler()) again — it would cause duplicate responses.
+  // Register routes on httpSrv.Engine() and gRPC services on grpcSrv.Server().
+  // httpserver.New already mounts: RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler.
+  // Do NOT call r.Use(mw.ErrorHandler()) again — it would cause duplicate responses.
 
-    if err := app.New(
-        app.WithName(cfg.GetString("app.name")),
-        app.WithServer(httpSrv, grpcSrv),
-        app.WithLogger(log),
-        app.WithLifecycle(tracingProvider, metricProvider),
-        app.WithBeforeStart(func(ctx context.Context) error {
-            httpSrv.SetReady(true)
-            return nil
-        }),
-    ).Run(); err != nil {
-        logger.Error(context.Background(), "fatal", logger.F("err", err))
-        os.Exit(1)
-    }
+  if err := app.New(
+    app.WithName(cfg.GetString("app.name")),
+    app.WithServer(httpSrv, grpcSrv),
+    app.WithLogger(log),
+    app.WithLifecycle(tracingProvider, metricProvider),
+    app.WithBeforeStart(func(ctx context.Context) error {
+      httpSrv.SetReady(true)
+      return nil
+    }),
+  ).Run(); err != nil {
+    logger.Error(context.Background(), "fatal", logger.F("err", err))
+    os.Exit(1)
+  }
 }
 ```
 
@@ -134,10 +134,10 @@ app:
 # HTTP server
 server:
   http:
-    addr: :8080 # listen address (default :8080)
-    timeout: 30s # read and write timeout (default 30s)
+  addr: :8080 # listen address (default :8080)
+  timeout: 30s # read and write timeout (default 30s)
   grpc:
-    addr: :9090 # listen address (default :9090)
+  addr: :9090 # listen address (default :9090)
 
 # Structured logger
 logger:
@@ -148,8 +148,8 @@ logger:
   max_age: 7 # days to retain rotated files (default 7)
   max_backups: 10 # max number of rotated files to keep (default 10)
   mask_fields: # field names partially redacted in logs
-    - password
-    - token
+  - password
+  - token
 
 # Distributed tracing (OpenTelemetry OTLP)
 tracing:
@@ -164,23 +164,23 @@ metric:
 # Database connections
 database:
   default:
-    driver: mysql # mysql | postgres | sqlite
-    dsn: 'user:pass@tcp(localhost:3306)/mydb?parseTime=true'
-    max_open_conns: 100
-    max_idle_conns: 10
-    conn_max_lifetime: 1h
-    trace_all_sql: false # emit OTel spans for every SQL statement
-    slow_threshold: 200ms # log warning for queries exceeding this
+  driver: mysql # mysql | postgres | sqlite
+  dsn: 'user:pass@tcp(localhost:3306)/mydb?parseTime=true'
+  max_open_conns: 100
+  max_idle_conns: 10
+  conn_max_lifetime: 1h
+  trace_all_sql: false # emit OTel spans for every SQL statement
+  slow_threshold: 200ms # log warning for queries exceeding this
 
 # Cache — in-memory by default; Redis is optional
 cache:
   default:
-    backend: memory
+  backend: memory
   redis:
-    backend: redis
-    addr: 'redis:6379'
-    password: ''
-    db: 0
+  backend: redis
+  addr: 'redis:6379'
+  password: ''
+  db: 0
 ```
 
 Environment variables override any YAML key. With `WithEnv("APP")`, the variable `APP_SERVER_HTTP_ADDR` overrides `server.http.addr`.
@@ -209,9 +209,9 @@ Viper-backed configuration loader.
 
 ```go
 cfg, _ := config.Load(
-    config.WithFile("config.yaml"),
-    config.WithEnv("APP"),    // APP_SERVER_HTTP_ADDR → server.http.addr
-    config.WithWatch(),       // live-reload on file change
+  config.WithFile("config.yaml"),
+  config.WithEnv("APP"),    // APP_SERVER_HTTP_ADDR → server.http.addr
+  config.WithWatch(),       // live-reload on file change
 )
 cfg.GetString("app.name")
 cfg.Scan("database.default", &dbCfg)
@@ -243,11 +243,11 @@ OpenTelemetry OTLP trace provider. Implements `core.Provider` and `app.Lifecycle
 ```go
 // New() does all setup; a no-op provider is returned when no exporter is configured.
 p, _ := tracing.New(
-    tracing.WithConfig(cfg),
-    tracing.WithLogger(log),      // log exporter errors
-    tracing.WithOTLP("http://jaeger:4318"),
-    tracing.WithSampler(0.1),
-    tracing.WithTLS(),            // enable TLS for the OTLP exporter
+  tracing.WithConfig(cfg),
+  tracing.WithLogger(log),      // log exporter errors
+  tracing.WithOTLP("http://jaeger:4318"),
+  tracing.WithSampler(0.1),
+  tracing.WithTLS(),            // enable TLS for the OTLP exporter
 )
 app.WithLifecycle(p)              // Init() no-op; Shutdown() flushes spans
 ```
@@ -283,20 +283,20 @@ Lifecycle manager. Coordinates component initialization and graceful shutdown.
 
 ```go
 app.New(
-    app.WithName("my-service"),
-    app.WithVersion("v1.0.0"),
-    app.WithLogger(log),
-    app.WithServer(httpSrv, grpcSrv, cronScheduler, streamWorker),
-    app.WithMigration(dbManager),       // Up() called before Lifecycle.Init
-    app.WithLifecycle(tracingProvider, metricProvider), // Init before servers, Shutdown after (reverse)
-    app.WithCloser(cacheManager, grpcclient.NewRegistry()), // Close after Lifecycle.Shutdown
-    app.WithHealthCheck(                // register health checkers for centralized access
-        dbMgr.HealthChecker("default"),
-        cacheMgr.HealthChecker("redis"),
-    ),
-    app.WithBeforeStart(func(ctx) error { httpSrv.SetReady(true); return nil }),
-    app.WithAfterStop(func(ctx) error { return nil }),
-    app.WithShutdownTimeout(30 * time.Second),
+  app.WithName("my-service"),
+  app.WithVersion("v1.0.0"),
+  app.WithLogger(log),
+  app.WithServer(httpSrv, grpcSrv, cronScheduler, streamWorker),
+  app.WithMigration(dbManager),       // Up() called before Lifecycle.Init
+  app.WithLifecycle(tracingProvider, metricProvider), // Init before servers, Shutdown after (reverse)
+  app.WithCloser(cacheManager, grpcclient.NewRegistry()), // Close after Lifecycle.Shutdown
+  app.WithHealthCheck(                // register health checkers for centralized access
+    dbMgr.HealthChecker("default"),
+    cacheMgr.HealthChecker("redis"),
+  ),
+  app.WithBeforeStart(func(ctx) error { httpSrv.SetReady(true); return nil }),
+  app.WithAfterStop(func(ctx) error { return nil }),
+  app.WithShutdownTimeout(30 * time.Second),
 ).Run()
 ```
 
@@ -347,16 +347,16 @@ Gin-based HTTP server. `New()` mounts the full middleware stack automatically.
 
 ```go
 srv, _ := httpserver.New(
-    httpserver.WithConfig(cfg),
-    httpserver.WithLogger(log),
-    httpserver.WithAddr(":8080"),          // or WithListener(ln) for :0 random port
-    httpserver.WithHealthChecks(           // probe external deps in /readyz
-        dbMgr.HealthChecker("default"),    // SELECT 1
-        cacheMgr.HealthChecker("redis"),   // PING
-    ),
-    httpserver.WithReadyCheck("db", func(ctx context.Context) error {
-        return database.DB("default").WithContext(ctx).Exec("SELECT 1").Error
-    }),
+  httpserver.WithConfig(cfg),
+  httpserver.WithLogger(log),
+  httpserver.WithAddr(":8080"),          // or WithListener(ln) for :0 random port
+  httpserver.WithHealthChecks(           // probe external deps in /readyz
+    dbMgr.HealthChecker("default"),    // SELECT 1
+    cacheMgr.HealthChecker("redis"),   // PING
+  ),
+  httpserver.WithReadyCheck("db", func(ctx context.Context) error {
+    return database.DB("default").WithContext(ctx).Exec("SELECT 1").Error
+  }),
 )
 r := srv.Engine()                          // access underlying *gin.Engine for route registration
 r.GET("/users", handler.ListUsers)
@@ -375,10 +375,10 @@ Auto-registered endpoints: `/healthz`, `/readyz`, `/health`
 
 ```go
 grpcSrv, _ := grpcserver.New(
-    grpcserver.WithConfig(cfg),
-    grpcserver.WithLogger(log),
-    grpcserver.WithAddr(":9090"),
-    grpcserver.WithTLS("cert.pem", "key.pem"),
+  grpcserver.WithConfig(cfg),
+  grpcserver.WithLogger(log),
+  grpcserver.WithAddr(":9090"),
+  grpcserver.WithTLS("cert.pem", "key.pem"),
 )
 pb.RegisterMyServiceServer(grpcSrv.Server(), &myServiceImpl{})
 ```
@@ -393,18 +393,18 @@ Pre-mounted by `server/http`. Available for standalone use on a plain `*gin.Engi
 
 ```go
 r.Use(
-    mw.RequestID(),
-    mw.Tracing("my-service"),
-    mw.Logger(log),
-    mw.Metrics(),
-    mw.Recovery(),
-    mw.ErrorHandler(),
-    // Optional:
-    mw.CORS(),
-    mw.Timeout(10 * time.Second),
-    mw.BodyLimit(4 * 1024 * 1024),        // 4 MB
-    mw.RateLimit(ratelimit.NewTokenBucket(100, 10)),
-    mw.IPFilter(mw.WithCIDRWhitelist("10.0.0.0/8")),
+  mw.RequestID(),
+  mw.Tracing("my-service"),
+  mw.Logger(log),
+  mw.Metrics(),
+  mw.Recovery(),
+  mw.ErrorHandler(),
+  // Optional:
+  mw.CORS(),
+  mw.Timeout(10 * time.Second),
+  mw.BodyLimit(4 * 1024 * 1024),        // 4 MB
+  mw.RateLimit(ratelimit.NewTokenBucket(100, 10)),
+  mw.IPFilter(mw.WithCIDRWhitelist("10.0.0.0/8")),
 )
 ```
 
@@ -415,9 +415,9 @@ r.Use(
 ```go
 // Create manager (no global side effects)
 mgr, _ := database.New(
-    database.WithConfig(cfg),
-    database.WithLogger(log),
-    database.WithMigrationsDir("migrations"),
+  database.WithConfig(cfg),
+  database.WithLogger(log),
+  database.WithMigrationsDir("migrations"),
 )
 // Register for global access (optional)
 database.Register("default", mgr)
@@ -443,8 +443,8 @@ httpSrv.AddReadyCheck(hc.Name(), hc.Check)
 ```go
 // Create Manager (no global side effects)
 mgr, _ := cache.New(
-    cache.WithMemory("default"),
-    cache.WithRedis("redis", "redis:6379"),
+  cache.WithMemory("default"),
+  cache.WithRedis("redis", "redis:6379"),
 )
 // Register for global access
 cache.Register("default", mgr)
@@ -498,8 +498,8 @@ httpclient.CloseAll()
 ```go
 // Dial first, then register
 conn, err := grpcclient.Dial("inventory-svc:9090",
-    grpcclient.WithTLS(),
-    grpcclient.WithRetry(3),
+  grpcclient.WithTLS(),
+  grpcclient.WithRetry(3),
 )
 grpcclient.Register("inventory", conn)
 conn := grpcclient.Get("inventory")
@@ -532,11 +532,11 @@ if err := locker.LockWait(ctx, "job:process", 30*time.Second, 5*time.Second); er
 scheduler, _ := cron.New(cron.WithLogger(log), cron.WithLocation(time.UTC))
 
 scheduler.Add("cleanup", "@every 1h",
-    func(ctx context.Context) error { return cleanupOldRecords(ctx) },
-    cron.WithTimeout(5*time.Minute),
-    cron.WithRetry(3),
-    cron.WithSkipIfRunning(),
-    cron.WithDistributedLock(locker), // only one cluster node runs each tick
+  func(ctx context.Context) error { return cleanupOldRecords(ctx) },
+  cron.WithTimeout(5*time.Minute),
+  cron.WithRetry(3),
+  cron.WithSkipIfRunning(),
+  cron.WithDistributedLock(locker), // only one cluster node runs each tick
 )
 app.WithServer(scheduler)            // scheduler implements core.Server
 ```
@@ -551,8 +551,8 @@ bus := event.New()                       // synchronous
 bus := event.New(event.WithAsync())      // async (errors logged, not returned)
 
 bus.Subscribe("user.registered", func(ctx context.Context, payload any) error {
-    e := payload.(UserRegisteredEvent)
-    return mailer.SendWelcome(ctx, e.Email)
+  e := payload.(UserRegisteredEvent)
+  return mailer.SendWelcome(ctx, e.Email)
 })
 
 err := bus.Publish(ctx, "user.registered", UserRegisteredEvent{Email: "a@b.com"})
@@ -566,24 +566,24 @@ bus.Unsubscribe("user.registered")
 ```go
 // New returns (*Bus, error) — nil client is rejected
 bus, _ := stream.New(
-    cache.RedisClient("redis"),
-    stream.WithLogger(log),
-    stream.WithMaxLen(10_000),
+  cache.RedisClient("redis"),
+  stream.WithLogger(log),
+  stream.WithMaxLen(10_000),
 )
 
 // Register subscriptions before starting Worker
 bus.Subscribe("order.created",
-    stream.WithGroup("order-service"),     // work-queue: one instance processes each message
-    stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
-        var order Order
-        msg.Decode(&order)
-        return processOrder(ctx, order)
-    }),
-    stream.WithRetries(3),
+  stream.WithGroup("order-service"),     // work-queue: one instance processes each message
+  stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
+    var order Order
+    msg.Decode(&order)
+    return processOrder(ctx, order)
+  }),
+  stream.WithRetries(3),
 )
 bus.Subscribe("audit.event",
-    stream.WithBroadcast(),                // every instance receives each message
-    stream.WithHandler(auditHandler),
+  stream.WithBroadcast(),                // every instance receives each message
+  stream.WithHandler(auditHandler),
 )
 
 app.WithServer(bus.Worker())              // Worker implements core.Server
@@ -596,20 +596,20 @@ bus.Publish(ctx, "order.created", order)
 
 ```go
 type Claims struct {
-    jwt.RegisteredClaims
-    UserID int64  `json:"user_id"`
-    Role   string `json:"role"`
+  jwt.RegisteredClaims
+  UserID int64  `json:"user_id"`
+  Role   string `json:"role"`
 }
 
 signer, _ := auth.NewSigner[Claims](auth.WithSecret("my-secret"), auth.WithTTL(24*time.Hour))
 token, _ := signer.Sign(Claims{UserID: 42, Role: "admin"})
 
 r.POST("/login", func(c *gin.Context) {
-    c.JSON(200, gin.H{"token": token})
+  c.JSON(200, gin.H{"token": token})
 })
 r.GET("/profile", auth.Required[Claims](signer), func(c *gin.Context) {
-    claims := auth.FromContext[Claims](c)
-    c.JSON(200, claims)
+  claims := auth.FromContext[Claims](c)
+  c.JSON(200, claims)
 })
 ```
 
@@ -619,16 +619,16 @@ r.GET("/profile", auth.Required[Claims](signer), func(c *gin.Context) {
 
 ```go
 type CreateUserReq struct {
-    Name  string `json:"name"  validate:"required,min=2,max=64"`
-    Email string `json:"email" validate:"required,email"`
+  Name  string `json:"name"  validate:"required,min=2,max=64"`
+  Email string `json:"email" validate:"required,email"`
 }
 
 r.POST("/users", func(c *gin.Context) {
-    var req CreateUserReq
-    if err := validate.BindJSON(c, &req); err != nil {
-        return // ErrorHandler middleware writes 400 with field-level details
-    }
-    // req is valid
+  var req CreateUserReq
+  if err := validate.BindJSON(c, &req); err != nil {
+    return // ErrorHandler middleware writes 400 with field-level details
+  }
+  // req is valid
 })
 ```
 
@@ -638,12 +638,12 @@ r.POST("/users", func(c *gin.Context) {
 
 ```go
 r.GET("/users", func(c *gin.Context) {
-    p := pagination.FromQuery(c)          // ?page=2&page_size=20
-    offset := pagination.Offset(p)       // (page-1) * page_size
-    var users []User
-    db.Limit(p.PageSize).Offset(offset).Find(&users)
-    total := db.Model(&User{}).Count()
-    c.JSON(200, pagination.New(users, total, p))
+  p := pagination.FromQuery(c)          // ?page=2&page_size=20
+  offset := pagination.Offset(p)       // (page-1) * page_size
+  var users []User
+  db.Limit(p.PageSize).Offset(offset).Find(&users)
+  total := db.Model(&User{}).Count()
+  c.JSON(200, pagination.New(users, total, p))
 })
 ```
 
@@ -670,13 +670,13 @@ ulid := idgen.ULID()                       // time-sortable string, no registrat
 
 ```go
 cb := circuitbreaker.New(
-    circuitbreaker.WithThreshold(5),           // trips after 5 consecutive failures
-    circuitbreaker.WithTimeout(30*time.Second), // half-open probe after 30s
-    circuitbreaker.WithLogger(log),
+  circuitbreaker.WithThreshold(5),           // trips after 5 consecutive failures
+  circuitbreaker.WithTimeout(30*time.Second), // half-open probe after 30s
+  circuitbreaker.WithLogger(log),
 )
 
 err := cb.Execute(ctx, func(ctx context.Context) error {
-    return externalService.Call(ctx, payload)
+  return externalService.Call(ctx, payload)
 })
 // err == circuitbreaker.ErrOpen when the breaker is tripped
 ```
@@ -688,9 +688,9 @@ err := cb.Execute(ctx, func(ctx context.Context) error {
 ```go
 // Create instance first, then register
 s, err := storage.New(storage.WithS3(storage.S3Config{
-    Bucket: "my-avatars", Region: "us-east-1",
-    AccessKey: cfg.GetString("storage.access_key"),
-    SecretKey: cfg.GetString("storage.secret_key"),
+  Bucket: "my-avatars", Region: "us-east-1",
+  AccessKey: cfg.GetString("storage.access_key"),
+  SecretKey: cfg.GetString("storage.secret_key"),
 }))
 storage.Register("avatars", s)
 
@@ -709,9 +709,9 @@ n := notify.New(notify.WithConfig(cfg))
 
 // Email
 n.SendEmail(ctx, notify.Email{
-    To:      []string{"alice@example.com"},
-    Subject: "Welcome",
-    Body:    "<h1>Hello</h1>",
+  To:      []string{"alice@example.com"},
+  Subject: "Welcome",
+  Body:    "<h1>Hello</h1>",
 })
 
 // DingTalk webhook
@@ -759,7 +759,7 @@ r.Use(mw.RateLimit(lim))
 ```go
 port := testutil.FreePort()                            // random available TCP port
 cfg  := testutil.NewConfig(map[string]any{             // stub core.Config
-    "server.http.addr": ":8081",
+  "server.http.addr": ":8081",
 })
 log  := testutil.NewLogger(t)                          // writes to t.Log
 ```
@@ -771,17 +771,17 @@ log  := testutil.NewLogger(t)                          // writes to t.Log
 ```go
 // ✅ Correct — use c.Error(); ErrorHandler writes the response
 r.GET("/users/:id", func(c *gin.Context) {
-    user, err := svc.GetUser(ctx, id)
-    if err != nil {
-        c.Error(err)   // err should be a *errors.CodedError
-        return
-    }
-    c.JSON(200, user)
+  user, err := svc.GetUser(ctx, id)
+  if err != nil {
+    c.Error(err)   // err should be a *errors.CodedError
+    return
+  }
+  c.JSON(200, user)
 })
 
 // ❌ Wrong — bypasses ErrorHandler, no structured response
 r.GET("/users/:id", func(c *gin.Context) {
-    c.JSON(500, gin.H{"error": err.Error()})
+  c.JSON(500, gin.H{"error": err.Error()})
 })
 ```
 
@@ -807,22 +807,22 @@ var ErrDuplicate    = errors.Define(409, "USER_DUPLICATE", "user already exists"
 
 // Service layer
 func (s *UserService) Get(ctx context.Context, id int64) (*User, error) {
-    u, err := s.repo.FindByID(ctx, id)
-    if err != nil {
-        return nil, errors.Wrap(ErrUserNotFound, "get user %d: %w", id, err)
-    }
-    return u, nil
+  u, err := s.repo.FindByID(ctx, id)
+  if err != nil {
+    return nil, errors.Wrap(ErrUserNotFound, "get user %d: %w", id, err)
+  }
+  return u, nil
 }
 
 // Handler
 func (h *UserHandler) Get(c *gin.Context) {
-    id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-    user, err := h.svc.Get(c.Request.Context(), id)
-    if err != nil {
-        c.Error(err)   // ErrorHandler middleware converts to JSON
-        return
-    }
-    c.JSON(200, user)
+  id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+  user, err := h.svc.Get(c.Request.Context(), id)
+  if err != nil {
+    c.Error(err)   // ErrorHandler middleware converts to JSON
+    return
+  }
+  c.JSON(200, user)
 }
 ```
 

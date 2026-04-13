@@ -114,8 +114,8 @@ Three interfaces govern component lifecycle, all coordinated by `app.Run()`:
 // core.Server — owns a blocking goroutine
 // Start must block until Stop is called.
 type Server interface {
-    Start(ctx context.Context) error
-    Stop(ctx context.Context) error
+  Start(ctx context.Context) error
+  Stop(ctx context.Context) error
 }
 // Implementations: server/http, server/grpc, cron.Scheduler, stream.Bus.Worker()
 
@@ -123,15 +123,15 @@ type Server interface {
 // Init called before servers start; Shutdown called after servers stop (reverse order).
 // If Init[i] fails, Init[0..i-1].Shutdown() are called before Run returns.
 type Lifecycle interface {
-    Init(ctx context.Context) error
-    Shutdown(ctx context.Context) error
+  Init(ctx context.Context) error
+  Shutdown(ctx context.Context) error
 }
 // Implementations: tracing.Provider, metric.Provider
 
 // app.Closer — resource released after all Lifecycle.Shutdown calls
 // Close called in registration order; errors collected but do not stop subsequent Closers.
 type Closer interface {
-    Close() error
+  Close() error
 }
 // Implementations: cache.Manager, grpcclient.Registry
 ```
@@ -186,12 +186,12 @@ if errors.As(err, &ce) { fmt.Println(ce.Code, ce.Reason) }
 
 // 4. HTTP handler: use c.Error() — ErrorHandler middleware writes the response
 func (h *Handler) Get(c *gin.Context) {
-    user, err := h.svc.Get(c.Request.Context(), id)
-    if err != nil {
-        c.Error(err)   // do NOT call c.JSON(500, ...) — bypasses ErrorHandler
-        return
-    }
-    c.JSON(200, user)
+  user, err := h.svc.Get(c.Request.Context(), id)
+  if err != nil {
+    c.Error(err)   // do NOT call c.JSON(500, ...) — bypasses ErrorHandler
+    return
+  }
+  c.JSON(200, user)
 }
 ```
 
@@ -205,10 +205,10 @@ Non-`CodedError` values produce a generic 500 (message not forwarded to client).
 # config.yaml — one Redis backend shared by cache, lock, stream
 cache:
   app:
-    backend: memory          # in-memory cache for application data
+  backend: memory          # in-memory cache for application data
   redis:
-    backend: redis           # shared Redis for lock + stream
-    addr: "redis:6379"
+  backend: redis           # shared Redis for lock + stream
+  addr: "redis:6379"
 ```
 
 ```go
@@ -237,8 +237,8 @@ streamBus, _ := stream.New(cache.RedisClient("redis"))
 
 ```
 metric.Provider.Init()
-    └─ wireHTTPMetrics()  // calls middleware/http.RegisterHTTPMetricHooks()
-    └─ wireGRPCMetrics()  // calls middleware/grpc.RegisterGRPCMetricHooks()
+  └─ wireHTTPMetrics()  // calls middleware/http.RegisterHTTPMetricHooks()
+  └─ wireGRPCMetrics()  // calls middleware/grpc.RegisterGRPCMetricHooks()
 ```
 
 Both wire functions are guarded by `sync.Once` — calling `Init()` on multiple `metric.Provider` instances is safe; only the first takes effect for middleware hooks.
@@ -269,8 +269,8 @@ newpkg/
 ```go
 // options.go
 type options struct {
-    cfg core.Config
-    log core.Logger
+  cfg core.Config
+  log core.Logger
 }
 type Option func(*options)
 
@@ -280,9 +280,9 @@ func defaultOptions() options           { return options{log: logger.Default()} 
 
 // newpkg.go
 func New(opts ...Option) (*T, error) {
-    o := defaultOptions()
-    for _, opt := range opts { opt(&o) }
-    // validate, return
+  o := defaultOptions()
+  for _, opt := range opts { opt(&o) }
+  // validate, return
 }
 ```
 
@@ -291,21 +291,21 @@ func New(opts ...Option) (*T, error) {
 ```go
 var ErrAlreadyRegistered = errors.Define(409, "NEWPKG_ALREADY_REGISTERED", "already registered")
 var (
-    registry   = map[string]*T{}
-    registryMu sync.RWMutex
+  registry   = map[string]*T{}
+  registryMu sync.RWMutex
 )
 
 func Register(name string, t *T) error {
-    registryMu.Lock(); defer registryMu.Unlock()
-    if _, ok := registry[name]; ok { return ErrAlreadyRegistered }
-    registry[name] = t; return nil
+  registryMu.Lock(); defer registryMu.Unlock()
+  if _, ok := registry[name]; ok { return ErrAlreadyRegistered }
+  registry[name] = t; return nil
 }
 func Replace(name string, t *T) error {
-    registryMu.Lock()
-    old := registry[name]; registry[name] = t
-    registryMu.Unlock()
-    if old != nil { old.Close() }   // or equivalent cleanup
-    return nil
+  registryMu.Lock()
+  old := registry[name]; registry[name] = t
+  registryMu.Unlock()
+  if old != nil { old.Close() }   // or equivalent cleanup
+  return nil
 }
 func Get(name string) *T { registryMu.RLock(); defer registryMu.RUnlock(); return registry[name] }
 func reset() { /* unexported; _test.go only */ registryMu.Lock(); clear(registry); registryMu.Unlock() }
@@ -315,8 +315,8 @@ func reset() { /* unexported; _test.go only */ registryMu.Lock(); clear(registry
 
 ```go
 var (
-    ErrNotFound = errors.Define(404, "NEWPKG_NOT_FOUND", "resource not found")
-    ErrConflict = errors.Define(409, "NEWPKG_CONFLICT",  "resource conflict")
+  ErrNotFound = errors.Define(404, "NEWPKG_NOT_FOUND", "resource not found")
+  ErrConflict = errors.Define(409, "NEWPKG_CONFLICT",  "resource conflict")
 )
 ```
 
@@ -349,25 +349,25 @@ Wire into `/readyz` via one of three patterns:
 ```go
 // Pattern A: at construction time (preferred)
 srv, _ := httpserver.New(
-    httpserver.WithHealthChecks(
-        dbMgr.HealthChecker("default"),
-        cacheMgr.HealthChecker("redis"),
-    ),
+  httpserver.WithHealthChecks(
+    dbMgr.HealthChecker("default"),
+    cacheMgr.HealthChecker("redis"),
+  ),
 )
 
 // Pattern B: after construction in BeforeStart
 app.WithBeforeStart(func(ctx context.Context) error {
-    httpSrv.AddReadyCheck("db", dbMgr.HealthChecker("default").Check)
-    return nil
+  httpSrv.AddReadyCheck("db", dbMgr.HealthChecker("default").Check)
+  return nil
 })
 
 // Pattern C: centralized via app, bridged manually
 myApp := app.New(app.WithHealthCheck(dbMgr.HealthChecker("default"), cacheMgr.HealthChecker("redis")))
 app.WithBeforeStart(func(ctx context.Context) error {
-    for _, hc := range myApp.HealthCheckers() {
-        httpSrv.AddReadyCheck(hc.Name(), hc.Check)
-    }
-    return nil
+  for _, hc := range myApp.HealthCheckers() {
+    httpSrv.AddReadyCheck(hc.Name(), hc.Check)
+  }
+  return nil
 })
 ```
 

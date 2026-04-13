@@ -39,8 +39,8 @@ All registry packages now require a pre-built instance, not options:
 
 ```go
 type HealthChecker interface {
-    Name() string
-    Check(ctx context.Context) error
+  Name() string
+  Check(ctx context.Context) error
 }
 ```
 
@@ -48,8 +48,8 @@ type HealthChecker interface {
 
 ```go
 httpserver.New(httpserver.WithHealthChecks(
-    dbMgr.HealthChecker("default"),    // probes SELECT 1
-    cacheMgr.HealthChecker("redis"),   // probes PING
+  dbMgr.HealthChecker("default"),    // probes SELECT 1
+  cacheMgr.HealthChecker("redis"),   // probes PING
 ))
 // Or after construction:
 httpSrv.AddReadyCheck("cache", cacheMgr.HealthChecker("redis").Check)
@@ -177,7 +177,7 @@ Affected packages: `database`, `cache`, `httpclient`, `grpcclient`, `storage`, `
 
 ```go
 if err := cache.Register("default", mgr); errors.Is(err, cache.ErrAlreadyRegistered) {
-    // already registered — skip or Replace
+  // already registered — skip or Replace
 }
 cache.Replace("default", newMgr)  // closes old Manager, stores new one
 ```
@@ -188,11 +188,11 @@ cache.Replace("default", newMgr)  // closes old Manager, stores new one
 
 ```go
 type Lifecycle interface {
-    Init(ctx context.Context) error
-    Shutdown(ctx context.Context) error
+  Init(ctx context.Context) error
+  Shutdown(ctx context.Context) error
 }
 type Closer interface {
-    Close() error
+  Close() error
 }
 app.WithLifecycle(tracingProvider, metricProvider)
 app.WithCloser(cacheManager, grpcclient.NewRegistry())
