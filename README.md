@@ -6,56 +6,60 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 
 **Quick Start** (5 minutes): See [`example/quickstart`](./example/quickstart) for a minimal HTTP service with graceful shutdown.
 
-**Full Example**: See [`example/full`](./example/full) for database, cache, tracing, metrics, stream, cron, auth, and pprof.
+**Full Example**: See [`example/full`](./example/full) for database, cache, tracing, metrics, stream, cron, auth, storage, notifications, and pprof.
 
-## Global vs Instance
+## Design Philosophy
 
-This library is **instance-first**. Prefer creating explicit instances:
+`mk` is **instance-first**: prefer creating explicit instances over package-level singletons.
 
 ```go
-// Recommended
-bus, err := stream.New(cache.RedisClient("redis"))
-mgr, err := cache.New(cache.WithMemory("default"))
-cache.Register("default", mgr)
+// Preferred: explicit instance
+mgr, err := cache.New(cache.WithMemory("default"), cache.WithRedis("redis", "redis:6379"))
+cache.Register("default", mgr)                    // make globally accessible if needed
+c := mgr.Client("default")                        // instance access
+
+// Convenience: package-level accessor (delegates to Get("default"))
+c := cache.Client("default")
 ```
 
-Package-level convenience functions (like `cache.Client("name")`) delegate to the `"default"` registered instance and are suitable for small services. Larger services should inject instances explicitly.
+Registry packages (`database`, `cache`, `httpclient`, `grpcclient`, `storage`, `idgen`) follow a consistent contract:
+`Register` errors on duplicate, `Replace` closes the old resource, `Get` returns nil if not found.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design guide.
 
 ## Features
 
-| Package | Description |
-|---|---|
-| `core` | Shared interfaces: `Logger`, `Config`, `Server`, `Provider` |
-| `app` | Application lifecycle runner: migrations, server start/stop, signal handling |
-| `config` | Viper-backed config loader with file, env-var, and hot-reload support |
-| `logger` | Zap-backed structured logger with trace injection, masking, and level-split files |
-| `tracing` | OpenTelemetry OTLP trace provider; no-op when endpoint is unset |
-| `metric` | OpenTelemetry metrics with Prometheus and OTLP exporters |
-| `server/http` | Gin HTTP server with a default middleware stack pre-mounted |
-| `server/grpc` | gRPC server with interceptor chain, health check, and optional TLS |
-| `database` | GORM connection manager for MySQL, Postgres, and SQLite with goose migrations |
-| `cache` | Cache client manager with in-memory (default) and Redis backends; unified `Cache` interface |
-| `errors` | Structured `CodedError` with HTTP code, reason string, and cause chaining |
-| `middleware/http` | RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler, CORS, RateLimit, IPFilter, BodyLimit, Timeout |
-| `middleware/grpc` | UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler, UnaryRateLimit, UnaryIPFilter, UnaryTimeout |
-| `httpclient` | Outbound HTTP client with OTel tracing, exponential-backoff retry, and a named global registry |
-| `grpcclient` | Outbound gRPC client with OTel tracing, per-call retry, and a named global registry |
-| `lock` | Distributed lock backed by Redis with atomic acquire/release, auto-renew, and wait-with-timeout |
-| `cron` | Cron scheduler (`core.Server`) with retries, per-job timeouts, skip-if-running, and sub-second tickers |
-| `auth` | JWT signing/verification and gin middleware (`Required`, `Optional`) with typed claims extraction via generics |
-| `validate` | Request binding + struct validation backed by go-playground/validator; returns structured 400 errors with field-level metadata |
-| `pagination` | Standard page-number pagination params and a typed `Result[T]` response envelope for list endpoints |
-| `event` | In-process pub/sub event bus for decoupling modules; synchronous by default, optional async delivery |
-| `circuitbreaker` | Circuit breaker pattern for protecting outbound calls from cascading failures (Closed → Open → HalfOpen) |
-| `storage` | Unified object storage interface for S3, Alibaba Cloud OSS, and Tencent Cloud COS |
-| `notify` | Multi-channel notification dispatcher: Email (SMTP), SMS, DingTalk, WeCom, and Feishu webhooks |
-| `stream` | Distributed pub/sub and work-queue messaging backed by Redis Streams (XADD / XREADGROUP) |
-| `pprof` | pprof profiling endpoints; standalone server on a dedicated port or mounted on an existing gin.Engine |
-| `idgen` | Snowflake ID generator; package-level `Next()` and named registry; auto-derives worker ID from host IP |
-| `testutil` | Test helpers: `FreePort`, `NewConfig` (stub `core.Config` with type coercion), `NewLogger` (writes to `t.Log`) |
-| `ratelimit` | Standalone `Limiter` interface; in-process token-bucket or distributed Redis fixed-window; backs HTTP/gRPC middleware |
+| Package           | Description                                                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `core`            | Shared interfaces: `Logger`, `Config`, `Server`, `Provider`                                                                |
+| `errors`          | Structured `CodedError` with HTTP code, machine-readable reason, and cause chaining                                        |
+| `app`             | Lifecycle runner: Lifecycle.Init → BeforeStart → concurrent servers → Stop → Lifecycle.Shutdown → Closer.Close → AfterStop |
+| `config`          | Viper-backed config loader with file, env-var, and hot-reload support                                                      |
+| `logger`          | Zap-backed structured logger with trace injection, field masking, and level-split file output                              |
+| `tracing`         | OpenTelemetry OTLP trace provider; implements `app.Lifecycle`; no-op when endpoint is unset                                |
+| `metric`          | OTel metrics with Prometheus and OTLP exporters; implements `app.Lifecycle`; automatic HTTP/gRPC instrumentation           |
+| `server/http`     | Gin HTTP server; default middleware stack pre-mounted; `/healthz`, `/readyz`, `/health` auto-registered                    |
+| `server/grpc`     | gRPC server with interceptor chain, health check service, and optional TLS/mTLS                                            |
+| `middleware/http` | RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler, CORS, RateLimit, IPFilter, BodyLimit, Timeout                 |
+| `middleware/grpc` | UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler, UnaryRateLimit, UnaryIPFilter, UnaryTimeout   |
+| `database`        | GORM connection manager for MySQL, Postgres, SQLite; SQL tracing; goose migrations; `*Manager` implements `app.Migrator`   |
+| `cache`           | `Cache` interface; `Manager` holds named backends (memory/Redis); `Manager` implements `app.Closer`                        |
+| `httpclient`      | Outbound HTTP with OTel tracing, exponential-backoff retry, and named registry                                             |
+| `grpcclient`      | Outbound gRPC with OTel tracing, per-call retry, named registry; `Registry` implements `app.Closer`                        |
+| `lock`            | Redis distributed lock; atomic Lua acquire/release; optional auto-renew and wait-with-timeout                              |
+| `cron`            | Cron scheduler (`core.Server`); per-job retry, timeout, skip-if-running, sub-second tickers                                |
+| `event`           | In-process pub/sub `Bus`; synchronous default, optional async; no package-level state                                      |
+| `stream`          | Redis Streams pub/sub `Bus`; work-queue (`WithGroup`) and broadcast (`WithBroadcast`) modes                                |
+| `auth`            | JWT signing/verification; `Required`/`Optional` gin middleware; typed claims via generics                                  |
+| `validate`        | go-playground/validator binding; structured 400 errors with field-level metadata                                           |
+| `pagination`      | Page-number `Params` and typed `Result[T]` envelope for list endpoints                                                     |
+| `circuitbreaker`  | Circuit breaker (Closed → Open → HalfOpen); `Execute(ctx, fn)`                                                             |
+| `storage`         | Unified object storage interface for AWS S3, Alibaba OSS, and Tencent COS                                                  |
+| `notify`          | Multi-channel notifications: Email (SMTP), SMS (Aliyun), DingTalk, WeCom, Feishu                                           |
+| `pprof`           | pprof endpoints; standalone `core.Server` or mounted on an existing gin.Engine                                             |
+| `idgen`           | Snowflake ID generator + ULID; `New()` → `Register("name", gen)` → `Get("name").Next()`                                    |
+| `ratelimit`       | `Limiter` interface; in-process token-bucket or Redis fixed-window; backs HTTP/gRPC middleware                             |
+| `testutil`        | Test helpers: `FreePort`, `NewConfig` (stub `core.Config`), `NewLogger` (writes to `t.Log`)                                |
 
 ## Installation
 
@@ -84,34 +88,27 @@ import (
 )
 
 func main() {
-    cfg, err := config.Load(config.WithFile("config.yaml"), config.WithEnv("APP"))
-    if err != nil {
-        panic(err)
-    }
-
-    log, err := logger.New(logger.WithConfig(cfg))
-    if err != nil {
-        panic(err)
-    }
+    cfg, _ := config.Load(config.WithFile("config.yaml"), config.WithEnv("APP"))
+    log, _ := logger.New(logger.WithConfig(cfg))
     logger.SetDefault(log)
 
-    provider, _ := tracing.New(tracing.WithConfig(cfg))
-    metricProv, _ := metric.New(metric.WithConfig(cfg))
+    // tracing.Provider and metric.Provider implement app.Lifecycle:
+    // Init() is called before servers start, Shutdown() after they stop.
+    tracingProvider, _ := tracing.New(tracing.WithConfig(cfg), tracing.WithLogger(log))
+    metricProvider, _ := metric.New(metric.WithConfig(cfg))
 
     httpSrv, _ := httpserver.New(httpserver.WithConfig(cfg), httpserver.WithLogger(log))
     grpcSrv, _ := grpcserver.New(grpcserver.WithConfig(cfg), grpcserver.WithLogger(log))
 
-    // Register your routes here:
-    // httpSrv.Engine().GET("/hello", ...)
-    // pb.RegisterMyServiceServer(grpcSrv.Server(), ...)
+    // Register routes on httpSrv.Engine() and gRPC services on grpcSrv.Server().
+    // httpserver.New already mounts: RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler.
+    // Do NOT call r.Use(mw.ErrorHandler()) again — it would cause duplicate responses.
 
     if err := app.New(
         app.WithName(cfg.GetString("app.name")),
         app.WithServer(httpSrv, grpcSrv),
         app.WithLogger(log),
-        // Lifecycle: Init() before servers start, Shutdown() after they stop.
-        // tracing.Provider and metric.Provider both implement app.Lifecycle.
-        app.WithLifecycle(provider, metricProv),
+        app.WithLifecycle(tracingProvider, metricProvider),
         app.WithBeforeStart(func(ctx context.Context) error {
             httpSrv.SetReady(true)
             return nil
@@ -123,93 +120,85 @@ func main() {
 }
 ```
 
-Place a `config.yaml` next to the binary (see the complete reference below) and run the service. It handles `SIGTERM`/`SIGINT` for graceful shutdown.
+Place a `config.yaml` next to the binary and run. The app handles `SIGTERM`/`SIGINT` for graceful shutdown.
 
 ## Complete config.yaml Reference
 
 ```yaml
-# Application identity — read by server/http, server/grpc, tracing, and metric
+# Application identity
 app:
-  name: my-service          # service name propagated to OTel resource
-  version: v1.0.0           # echoed in /healthz and /readyz responses
-  env: development          # "production" disables gRPC server reflection
+  name: my-service # propagated to OTel resource, /healthz response
+  version: v1.0.0 # echoed in /healthz and /readyz responses
+  env: development # "production" disables gRPC server reflection
 
 # HTTP server
 server:
   http:
-    addr: :8080             # listen address (default :8080)
-    timeout: 30s            # read and write timeout (default 30s)
-
-# gRPC server
+    addr: :8080 # listen address (default :8080)
+    timeout: 30s # read and write timeout (default 30s)
   grpc:
-    addr: :9090             # listen address (default :9090)
+    addr: :9090 # listen address (default :9090)
 
 # Structured logger
 logger:
-  level: info               # debug | info | warn | error (live-reloadable)
-  output: stdout            # stdout | file | both
-  filename: /var/log/app    # base path; level-split files are appended as .info.log etc.
-  max_size: 100             # max size in MB before rotation (default 100)
-  max_age: 7                # max age in days to retain rotated files (default 7)
-  max_backups: 10           # max number of rotated files to keep (default 10)
-  mask_fields:              # field names whose values are partially redacted in logs
+  level: info # debug | info | warn | error (live-reloadable)
+  output: stdout # stdout | file | both
+  filename: /var/log/app # base path; level-split files appended as .info.log etc.
+  max_size: 100 # MB before rotation (default 100)
+  max_age: 7 # days to retain rotated files (default 7)
+  max_backups: 10 # max number of rotated files to keep (default 10)
+  mask_fields: # field names partially redacted in logs
     - password
     - token
 
-# Distributed tracing (OpenTelemetry OTLP over HTTP)
+# Distributed tracing (OpenTelemetry OTLP)
 tracing:
-  endpoint: ""              # e.g. http://jaeger:4318 — leave empty to disable tracing
-  sampler: 1.0              # tail-sampling ratio: 1.0 = 100%, 0.1 = 10%
+  endpoint: '' # e.g. http://jaeger:4318; leave empty to disable
+  sampler: 1.0 # sampling ratio: 1.0 = 100%
 
 # Metrics
 metric:
-  prometheus_addr: :9091    # address to expose /metrics — omit to disable Prometheus
-  otlp_endpoint: ""         # e.g. http://collector:4318 — omit to disable OTLP metrics
+  prometheus_addr: :9091 # expose /metrics; omit to disable Prometheus
+  otlp_endpoint: '' # e.g. http://collector:4318; omit to disable OTLP metrics
 
-# Database connections — default, read, and write names are scanned automatically
+# Database connections
 database:
   default:
-    driver: mysql           # mysql | postgres | sqlite
-    dsn: "user:pass@tcp(localhost:3306)/mydb?parseTime=true"
-    max_open_conns: 100     # default 100
-    max_idle_conns: 10      # default 10
-    conn_max_lifetime: 1h   # connection lifetime (0 = unlimited)
-    trace_all_sql: false    # emit OTel spans for every SQL statement
-    slow_threshold: 200ms   # log a warning for queries exceeding this duration
-  read:
-    driver: mysql
-    dsn: "user:pass@tcp(replica:3306)/mydb?parseTime=true"
-  write:
-    driver: mysql
-    dsn: "user:pass@tcp(primary:3306)/mydb?parseTime=true"
+    driver: mysql # mysql | postgres | sqlite
+    dsn: 'user:pass@tcp(localhost:3306)/mydb?parseTime=true'
+    max_open_conns: 100
+    max_idle_conns: 10
+    conn_max_lifetime: 1h
+    trace_all_sql: false # emit OTel spans for every SQL statement
+    slow_threshold: 200ms # log warning for queries exceeding this
 
 # Cache — in-memory by default; Redis is optional
 cache:
   default:
-    backend: memory        # in-memory, no Redis required
-  session:
+    backend: memory
+  redis:
     backend: redis
-    addr: "redis:6379"     # host:port
-    password: ""           # optional auth password
-    db: 0                  # Redis DB index
+    addr: 'redis:6379'
+    password: ''
+    db: 0
 ```
 
-Environment variables override any YAML key. When `WithEnv("APP")` is passed to `config.Load`, the variable `APP_SERVER_HTTP_ADDR` overrides `server.http.addr` (prefix stripped, underscores converted to dots).
+Environment variables override any YAML key. With `WithEnv("APP")`, the variable `APP_SERVER_HTTP_ADDR` overrides `server.http.addr`.
 
 ## Package Reference
 
 ### `core`
 
-Defines shared interfaces used across all packages to avoid import cycles.
+Shared interfaces that prevent import cycles across packages.
 
-| Interface | Description |
-|---|---|
-| `Logger` | `Debug/Info/Warn/Error(ctx, msg, ...Field)` plus `With(...Field) Logger` |
-| `Config` | `Get*`, `Scan`, `Watch` — see config package |
-| `Server` | `Start(ctx) error`, `Stop(ctx) error` |
-| `Provider` | `Tracer(name) trace.Tracer`, `Shutdown(ctx) error` |
+| Interface  | Description                                                           |
+| ---------- | --------------------------------------------------------------------- |
+| `Logger`   | `Debug/Info/Warn/Error(ctx, msg, ...Field)` + `With(...Field) Logger` |
+| `Config`   | `Get*`, `Scan`, `Watch`                                               |
+| `Server`   | `Start(ctx) error`, `Stop(ctx) error`                                 |
+| `Provider` | `Tracer(name) trace.Tracer`, `Shutdown(ctx) error`                    |
 
-`core.Field` is a `{Key string, Value any}` pair. Use `logger.F(key, value)` as a shorthand.
+`core.Field` is `{Key string, Value any}`. Use `logger.F(key, value)` as shorthand.
 
 ---
 
@@ -217,1555 +206,636 @@ Defines shared interfaces used across all packages to avoid import cycles.
 
 Viper-backed configuration loader.
 
-**Key functions**
-
 ```go
-cfg, err := config.Load(
-    config.WithFile("config.yaml"),  // YAML, TOML, or JSON — format auto-detected
-    config.WithEnv("APP"),           // enable env-var overrides with prefix APP_
-    config.WithWatch(),              // enable hot-reload on file change (fsnotify)
+cfg, _ := config.Load(
+    config.WithFile("config.yaml"),
+    config.WithEnv("APP"),    // APP_SERVER_HTTP_ADDR → server.http.addr
+    config.WithWatch(),       // live-reload on file change
 )
-
 cfg.GetString("app.name")
-cfg.GetInt("server.http.port")
-cfg.GetDuration("server.http.timeout")
-
-// Unmarshal a sub-tree into a struct
-var dbCfg database.DSNConfig
 cfg.Scan("database.default", &dbCfg)
-
-// Watch a key for runtime changes (only logger.level reacts at runtime)
-cfg.Watch("logger.level", func(v any) {
-    // v is the new value
-})
+cfg.Watch("logger.level", func(v any) { /* react to change */ })
 ```
-
-**Options**
-
-| Option | Description |
-|---|---|
-| `WithFile(path)` | Load config from the given file path |
-| `WithEnv(prefix)` | Enable `PREFIX_KEY_NAME` env-var overrides |
-| `WithWatch()` | Enable live reload via fsnotify |
 
 ---
 
 ### `logger`
 
-Zap-backed JSON structured logger. Every log call takes a `context.Context`; if an active OTel span is in the context, `trace_id` and `span_id` are automatically appended to the log entry.
-
-**Key functions**
+Zap-backed structured JSON logger. Auto-injects `trace_id`/`span_id` from an active OTel span.
 
 ```go
-log, err := logger.New(
-    logger.WithConfig(cfg),                        // read from config file
-    logger.WithMaskFields("password", "token"),    // partial-mask these fields
-)
-logger.SetDefault(log)
+log, _ := logger.New(logger.WithConfig(cfg), logger.WithLogger(zap.New(...)))
+logger.SetDefault(log) // optional bootstrap convenience
 
-// Package-level helpers (use the default logger)
-logger.Info(ctx, "user created", logger.F("user_id", 42))
-logger.Warn(ctx, "slow query", logger.F("elapsed", "350ms"))
-
-// Scoped logger carrying permanent fields
-reqLog := log.With(logger.F("request_id", rid))
-reqLog.Debug(ctx, "parsed request")
+log.Info(ctx, "user created", logger.F("user_id", 42))
+log.With(logger.F("component", "auth")).Warn(ctx, "token expired")
 ```
 
-**Options**
-
-| Option | Description |
-|---|---|
-| `WithLevel(level)` | `debug`, `info`, `warn`, `error` |
-| `WithOutput(output)` | `stdout`, `file`, `both` |
-| `WithFilename(path)` | Base path for level-split log files |
-| `WithMaxSizeMB(n)` | Max file size in MB before rotation |
-| `WithMaxAgeDays(n)` | Days to retain rotated files |
-| `WithMaxBackups(n)` | Max number of backup files |
-| `WithMaskFields(...)` | Field names to partially redact |
-| `WithConfig(cfg)` | Read all options from `core.Config` |
-
-**Log output format**
-
-```json
-{"ts":"2026-04-11T10:00:00.000Z","level":"info","caller":"main.go:42","msg":"user created","trace_id":"abc123","span_id":"def456","user_id":42}
-```
+When `output: file`, writes per-level files: `.debug.log`, `.info.log`, `.warn.log`, `.error.log`.
 
 ---
 
 ### `tracing`
 
-OpenTelemetry trace provider backed by OTLP over HTTP. When `endpoint` is empty, a no-op provider is returned — no spans are emitted and no connections are made.
+OpenTelemetry OTLP trace provider. Implements `core.Provider` and `app.Lifecycle`.
 
 ```go
-provider, err := tracing.New(
+// New() does all setup; a no-op provider is returned when no exporter is configured.
+p, _ := tracing.New(
     tracing.WithConfig(cfg),
-    // or explicitly:
-    tracing.WithEndpoint("http://jaeger:4318"),
-    tracing.WithServiceName("my-service"),
-    tracing.WithSampler(0.1), // 10% sampling
+    tracing.WithLogger(log),      // log exporter errors
+    tracing.WithOTLP("http://jaeger:4318"),
+    tracing.WithSampler(0.1),
+    tracing.WithTLS(),            // enable TLS for the OTLP exporter
 )
-
-// Use in a handler
-tracer := provider.Tracer("users")
-ctx, span := tracer.Start(ctx, "create-user")
-defer span.End()
-
-// Shutdown flushes pending spans; register with app.WithAfterStop
-provider.Shutdown(ctx)
+app.WithLifecycle(p)              // Init() no-op; Shutdown() flushes spans
 ```
-
-The HTTP and gRPC server middleware automatically propagate trace context and create per-request spans. The logger automatically reads `trace_id` and `span_id` from the context, so all log lines emitted inside a traced handler carry those fields without any explicit wiring.
 
 ---
 
 ### `metric`
 
-OpenTelemetry metrics with a Prometheus scrape endpoint and/or OTLP push. Call `metric.Init` once during startup. HTTP and gRPC middleware hooks are wired automatically.
+OTel metrics with Prometheus and OTLP exporters. Implements `app.Lifecycle`.
 
 ```go
-metric.Init(
-    metric.WithConfig(cfg),
-    // or explicitly:
-    metric.WithServiceName("my-service"),
-    metric.WithPrometheusAddr(":9091"),          // exposes GET /metrics
-    metric.WithOTLPEndpoint("http://otel:4318"), // push to collector
-)
+p, _ := metric.New(metric.WithConfig(cfg))
+app.WithLifecycle(p)   // Init() starts exporters and wires middleware hooks; Shutdown() flushes
 
-// Helpers — safe to call before Init (no-op until Init runs)
-metric.Count(ctx, "orders.created", 1, metric.Label("region", "us-east"))
-metric.Gauge(ctx, "queue.depth", float64(len(q)))
-stop := metric.StartTimer(ctx, "db.query", metric.Label("table", "users"))
-defer stop() // records duration_seconds histogram
+// Business helpers (delegate to default provider — safe to call after Init)
+metric.Count(ctx, "orders.created", 1, metric.Label("region", "us"))
+metric.Gauge(ctx, "queue.depth", 42)
+stop := metric.StartTimer(ctx, "db.query.duration")
+defer stop()
 
-// Shutdown in app.WithAfterStop
-metric.Shutdown()
+// Multi-provider / test isolation: use instance directly
+p.Init(ctx)
+meter := p.Meter()
 ```
 
-**Helpers**
-
-| Function | Description |
-|---|---|
-| `Count(ctx, name, n, labels...)` | Increment an int64 counter |
-| `Gauge(ctx, name, value, labels...)` | Set a float64 up-down counter |
-| `GaugeAdd / GaugeSub` | Delta operations on a gauge |
-| `StartTimer(ctx, name, labels...)` | Returns a `func()` that records elapsed seconds |
-| `Duration(ctx, name, d, labels...)` | Record a pre-measured duration |
+HTTP and gRPC middleware metrics are wired automatically when `p.Init()` is called. Wire functions are idempotent (`sync.Once`) — calling `Init()` on multiple providers is safe.
 
 ---
 
 ### `app`
 
-Lifecycle runner. Runs migrations, calls before-start hooks, starts all servers concurrently, blocks until `SIGTERM`/`SIGINT` or a server error, stops servers within the shutdown timeout, then calls after-stop hooks.
+Lifecycle manager. Coordinates component initialization and graceful shutdown.
 
 ```go
-a := app.New(
+app.New(
     app.WithName("my-service"),
     app.WithVersion("v1.0.0"),
-    app.WithServer(httpSrv, grpcSrv),    // any core.Server
     app.WithLogger(log),
-    app.WithMigration(dbMgr),            // run migrations before start
+    app.WithServer(httpSrv, grpcSrv, cronScheduler, streamWorker),
+    app.WithMigration(dbManager),       // Up() called before Lifecycle.Init
+    app.WithLifecycle(tracingProvider, metricProvider), // Init before servers, Shutdown after (reverse)
+    app.WithCloser(cacheManager, grpcclient.NewRegistry()), // Close after Lifecycle.Shutdown
+    app.WithBeforeStart(func(ctx) error { httpSrv.SetReady(true); return nil }),
+    app.WithAfterStop(func(ctx) error { return nil }),
     app.WithShutdownTimeout(30 * time.Second),
-    app.WithBeforeStart(func(ctx context.Context) error {
-        httpserver.SetReady(true)
-        return nil
-    }),
-    app.WithAfterStop(func(ctx context.Context) error {
-        metric.Shutdown()
-        return provider.Shutdown(ctx)
-    }),
-)
-
-if err := a.Run(); err != nil {
-    log.Fatal(err)
-}
+).Run()
 ```
 
-**Startup sequence**
+**Run() lifecycle order:**
 
-1. `WithMigration.Up(ctx)` — run pending database migrations
-2. `WithBeforeStart` hooks — in registration order
-3. Start all servers concurrently in goroutines
-4. Block until `SIGTERM`, `SIGINT`, or a server error
-5. `Stop` all servers concurrently (bounded by `ShutdownTimeout`)
-6. `WithAfterStop` hooks — in registration order
+| Phase | Action                                                                            |
+| ----- | --------------------------------------------------------------------------------- |
+| 1     | `Migrator.Up()`                                                                   |
+| 2     | `Lifecycle.Init()` — sequential; failure reverses already-init'd in reverse order |
+| 3     | `BeforeStart` hooks — sequential; first error aborts                              |
+| 4     | `Server.Start()` — all servers concurrent                                         |
+| 5     | Block on SIGTERM/SIGINT or server error                                           |
+| 6     | `Server.Stop()` — concurrent; errors logged                                       |
+| 7     | `Lifecycle.Shutdown()` — reverse registration order                               |
+| 8     | `Closer.Close()` — registration order                                             |
+| 9     | `AfterStop` hooks                                                                 |
+
+---
+
+### `errors`
+
+```go
+// Define package-level sentinels
+var ErrUserNotFound = errors.Define(404, "USER_NOT_FOUND", "user not found")
+
+// Wrap with context
+return errors.Wrap(ErrUserNotFound, "get user %d: %w", id, dbErr)
+
+// Check
+if errors.Is(err, ErrUserNotFound) { ... }
+var ce *errors.CodedError
+if errors.As(err, &ce) { fmt.Println(ce.Code, ce.Reason) }
+```
+
+`ErrorHandler` middleware (HTTP/gRPC) auto-converts `CodedError` to structured responses. Non-`CodedError` returns a generic 500.
+
+Builtin sentinels: `ErrBadRequest` (400), `ErrUnauthorized` (401), `ErrForbidden` (403), `ErrNotFound` (404), `ErrConflict` (409), `ErrInternal` (500).
 
 ---
 
 ### `server/http`
 
-Gin HTTP server. `New` returns a `*ginServer` that implements `core.Server`. The full default middleware stack is pre-mounted in the order shown below. Additional routes and middleware are added via `Engine()`.
+Gin-based HTTP server. `New()` mounts the full middleware stack automatically.
 
-**Default middleware stack**
+**Default middleware stack (in order):** RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler
 
-```
-RequestID -> Tracing -> Logger -> Metrics -> Recovery -> ErrorHandler
-```
-
-**Built-in routes** (no auth, always available)
-
-- `GET /healthz` — liveness probe
-- `GET /readyz` — readiness probe (controlled by `httpserver.SetReady(bool)`)
-- `GET /health` — alias for `/healthz`
+> ⚠️ Do NOT call `r.Use(mw.ErrorHandler())` after `httpserver.New()`. The middleware is already in the stack; adding it again causes duplicate JSON responses.
 
 ```go
-httpSrv, err := httpserver.New(
+srv, _ := httpserver.New(
     httpserver.WithConfig(cfg),
     httpserver.WithLogger(log),
-    // or explicitly:
-    httpserver.WithAddr(":8080"),
-    httpserver.WithReadTimeout(30 * time.Second),
-    httpserver.WithWriteTimeout(30 * time.Second),
-    httpserver.WithServiceName("my-service"),
-    httpserver.WithServiceVersion("v1.0.0"),
+    httpserver.WithAddr(":8080"),          // or WithListener(ln) for :0 random port
+    httpserver.WithReadyCheck("db", func(ctx context.Context) error {
+        return database.DB("default").WithContext(ctx).Exec("SELECT 1").Error
+    }),
 )
+r := srv.Engine()                          // access underlying *gin.Engine for route registration
+r.GET("/users", handler.ListUsers)
 
-r := httpSrv.Engine()
-r.GET("/api/v1/users", listUsersHandler)
-r.Use(httpMiddleware.CORS(httpMiddleware.CORSConfig{
-    AllowOrigins: []string{"https://example.com"},
-    AllowMethods: []string{"GET", "POST"},
-    AllowHeaders: []string{"Authorization", "Content-Type"},
-    MaxAge:       12 * time.Hour,
-}))
+srv.SetReady(true)                         // call in app.WithBeforeStart; affects /readyz
 ```
+
+Auto-registered endpoints: `/healthz`, `/readyz`, `/health`
 
 ---
 
 ### `server/grpc`
 
-gRPC server. `New` returns a `*grpcServer` that implements `core.Server`. Reflection is enabled by default and automatically disabled when `app.env` is `production`.
-
-**Default interceptor chain**
-
-```
-RequestID -> Logger -> Metrics -> Recovery -> ErrorHandler
-```
-Tracing is wired as a `StatsHandler` (otelgrpc v0.68+ API).
-
-**Built-in service**
-
-- `grpc.health.v1.Health/Check` — standard gRPC health check, always `SERVING`
-
 ```go
-grpcSrv, err := grpcserver.New(
+grpcSrv, _ := grpcserver.New(
     grpcserver.WithConfig(cfg),
     grpcserver.WithLogger(log),
-    // optional TLS:
-    grpcserver.WithTLS("/path/to/cert.pem", "/path/to/key.pem"),
+    grpcserver.WithAddr(":9090"),
+    grpcserver.WithTLS("cert.pem", "key.pem"),
 )
-
 pb.RegisterMyServiceServer(grpcSrv.Server(), &myServiceImpl{})
+```
+
+gRPC health check and reflection are registered automatically. Reflection is disabled when `app.env: production`.
+
+---
+
+### `middleware/http`
+
+Pre-mounted by `server/http`. Available for standalone use on a plain `*gin.Engine`:
+
+```go
+r.Use(
+    mw.RequestID(),
+    mw.Tracing("my-service"),
+    mw.Logger(log),
+    mw.Metrics(),
+    mw.Recovery(),
+    mw.ErrorHandler(),
+    // Optional:
+    mw.CORS(),
+    mw.Timeout(10 * time.Second),
+    mw.BodyLimit(4 * 1024 * 1024),        // 4 MB
+    mw.RateLimit(ratelimit.NewTokenBucket(100, 10)),
+    mw.IPFilter(mw.WithCIDRWhitelist("10.0.0.0/8")),
+)
 ```
 
 ---
 
 ### `database`
 
-GORM connection manager for MySQL, Postgres, and SQLite. All open connections are stored in a package-level registry and retrieved by name.
-
 ```go
-dbMgr, err := database.New(
-    database.WithConfig(cfg),            // reads database.default, .read, .write
+// Create manager (no global side effects)
+mgr, _ := database.New(
+    database.WithConfig(cfg),
     database.WithLogger(log),
     database.WithMigrationsDir("migrations"),
-    // or add connections explicitly:
-    database.WithDriver("replica", "postgres", "host=replica user=app dbname=mydb"),
 )
+// Register for global access (optional)
+database.Register("default", mgr)
 
-// Retrieve a connection anywhere in the codebase
-db := database.DB("default")  // *gorm.DB
-db.First(&user, id)
+// Instance access
+db := mgr.DB("default")      // *gorm.DB for the named connection
 
-// Run migrations manually (app.WithMigration calls this automatically)
-dbMgr.Up(ctx)
+// Global convenience (delegates to Get("default").DB(connName))
+db := database.DB("default")
+
+// Migrations — mgr implements app.Migrator
+app.WithMigration(mgr)
 ```
-
-`WithConfig` scans the keys `database.default`, `database.read`, and `database.write`. `WithDriver` adds an additional named connection programmatically.
-
-When `trace_all_sql: true` is set, every SQL statement is emitted as an OTel span. Queries exceeding `slow_threshold` emit a warning log regardless.
 
 ---
 
 ### `cache`
 
-Cache client manager with a unified `Cache` interface. All backends are stored in a package-level registry and retrieved by name. The default backend is in-memory (no external dependencies). Redis is optional and configured via `WithRedis`/`WithRedisAuth` or a `backend: redis` config entry. A slow-command hook logs a warning for Redis commands taking longer than 100 ms.
-
 ```go
-// In-memory (default, no Redis needed)
-cache.Init(cache.WithMemory("default"))
+// Create Manager (no global side effects)
+mgr, _ := cache.New(
+    cache.WithMemory("default"),
+    cache.WithRedis("redis", "redis:6379"),
+)
+// Register for global access
+cache.Register("default", mgr)
 
-// Redis (optional)
-cache.Init(cache.WithRedis("session", "redis:6379"))
+// Instance access
+c := mgr.Client("default")
+rdb := mgr.RedisClient("redis")    // *redis.Client for lock/stream
 
-// Use the Cache interface — same API regardless of backend
+// Global convenience (delegates to Get("default"))
 c := cache.Client("default")
+rdb := cache.RedisClient("redis")
 
-ctx := context.Background()
-c.Set(ctx, "user:1", userData, time.Hour)
+// mgr implements app.Closer — pass to app.WithCloser for automatic cleanup
+app.WithCloser(mgr)
 
-val, err := c.Get(ctx, "user:1")
-if errors.Is(err, cache.ErrCacheMiss) {
-    // key not found or expired
-}
-
-c.Del(ctx, "user:1")
-
-exists, err := c.Exists(ctx, "user:1")
-```
-
-**Options**
-
-| Option | Description |
-|---|---|
-| `WithMemory(name)` | Register a named in-memory backend (no external deps) |
-| `WithRedis(name, addr)` | Register a named Redis backend by `host:port` |
-| `WithRedisAuth(name, addr, password, db)` | Register a named Redis backend with auth and DB index |
-| `WithConfig(cfg)` | Read all backends from config (see YAML below) |
-| `WithLogger(log)` | Logger for slow Redis command warnings |
-
-**`RedisClient(name)` helper**
-
-`cache.RedisClient("name")` returns the underlying `*redis.Client` for a named Redis backend, or `nil` if the backend is not registered or is an in-memory backend. Use this to share a single Redis connection across packages that need direct Redis access — most commonly `stream` and `lock`:
-
-```go
-// Register a shared Redis backend once at startup
-cache.Init(cache.WithConfig(cfg))
-
-// Share the same connection with stream and lock — no duplicate connections
-stream.Init(cache.RedisClient("redis"))
-locker := lock.NewWithClient(cache.RedisClient("redis"))
-```
-
-**Config**
-
-```yaml
-cache:
-  default:
-    backend: memory        # in-memory, no Redis required
-  session:
-    backend: redis
-    addr: "redis:6379"
-    password: ""
-    db: 0
+c.Set(ctx, "key", "value", time.Hour)
+v, _ := c.Get(ctx, "key")
+c.Del(ctx, "key")
 ```
 
 ---
 
-### `errors`
-
-Structured errors with an HTTP status code and a machine-readable reason string.
-
-```go
-// Define sentinels at package level
-var ErrUserNotFound = errors.Define(404, "USER_NOT_FOUND", "user not found")
-
-// Attach context before returning
-func getUser(id int) (*User, error) {
-    u, err := db.Find(id)
-    if err == gorm.ErrRecordNotFound {
-        return nil, errors.Wrap(ErrUserNotFound, "id=%d", id)
-    }
-    return u, err
-}
-
-// Inspect at the handler layer
-if err != nil {
-    code   := errors.Code(err)    // 404
-    reason := errors.Reason(err)  // "USER_NOT_FOUND"
-    // errors.Is works across Wrap boundaries:
-    if errors.Is(err, ErrUserNotFound) { ... }
-}
-```
-
-**Predefined sentinels**
-
-| Variable | Code | Reason |
-|---|---|---|
-| `ErrBadRequest` | 400 | `BAD_REQUEST` |
-| `ErrUnAuth` | 401 | `UNAUTHORIZED` |
-| `ErrForbidden` | 403 | `FORBIDDEN` |
-| `ErrNotFound` | 404 | `NOT_FOUND` |
-| `ErrConflict` | 409 | `CONFLICT` |
-| `ErrTooMany` | 429 | `TOO_MANY_REQUEST` |
-| `ErrInternal` | 500 | `INTERNAL` |
-
 ### `httpclient`
 
-Outbound HTTP client with OTel tracing, exponential-backoff retry, JSON marshal/unmarshal helpers, and a named global registry. All methods are safe for concurrent use.
-
-**Key types / functions**
-
-| Symbol | Description |
-|---|---|
-| `New(opts...) *Client` | Create a client |
-| `Client.Get/Post/Put/Delete` | Typed HTTP verbs; body and response are JSON-marshalled automatically |
-| `Client.Do` | Raw request returning `*Response{StatusCode, Body}` |
-| `Register(name, opts...)` | Create and store a named client in the global registry |
-| `Get(name) *Client` | Retrieve a named client |
-| `Init(cfg, names...)` | Bulk-register clients from config |
-
-**Usage**
-
 ```go
-import "github.com/pemako/mk/httpclient"
+// Create
+httpclient.Register("payments", httpclient.WithBaseURL("https://api.payments.io"))
+// Or: explicitly check for duplicate
+if err := httpclient.Register(...); errors.Is(err, httpclient.ErrAlreadyRegistered) { ... }
 
-// One-off client
-c := httpclient.New(
-    httpclient.WithBaseURL("https://api.example.com"),
-    httpclient.WithTimeout(10 * time.Second),
-    httpclient.WithHeader("Authorization", "Bearer "+token),
-    httpclient.WithRetry(3),
-)
-
-var result MyResponse
-if err := c.Get(ctx, "/v1/users/42", &result); err != nil {
-    return err
-}
-
-if err := c.Post(ctx, "/v1/orders", orderReq, &result); err != nil {
-    return err
-}
-
-// Named registry — register once at startup
-httpclient.Register("payments",
-    httpclient.WithBaseURL("https://payments.internal"),
-    httpclient.WithRetry(3),
-    httpclient.WithRetryBaseDelay(200 * time.Millisecond),
-)
-
-// Use anywhere
-c := httpclient.Get("payments")
-c.Put(ctx, "/v1/charge/"+id, req, &resp)
-```
-
-**Options**
-
-| Option | Default | Description |
-|---|---|---|
-| `WithBaseURL(url)` | `""` | Base URL prepended to every request path |
-| `WithTimeout(d)` | `30s` | Per-request context deadline |
-| `WithRetry(n)` | `0` | Max retry attempts on network error, 429, or 5xx |
-| `WithRetryBaseDelay(d)` | `100ms` | Exponential-backoff base delay |
-| `WithRetryMaxDelay(d)` | `2s` | Backoff cap |
-| `WithHeader(k, v)` | — | Default header sent on every request |
-| `WithLogger(log)` | default logger | Logger for retry debug messages |
-
-**Config**
-
-```yaml
-httpclient:
-  default:
-    base_url: "https://api.example.com"
-    timeout: 30s
-    retry: 3
-  payments:
-    base_url: "https://payments.internal"
-    timeout: 10s
-    retry: 2
+client := httpclient.Get("payments")
+resp, body, err := client.GetJSON(ctx, "/v1/charges/123")
+resp, body, err := client.PostJSON(ctx, "/v1/charges", payload)
 ```
 
 ---
 
 ### `grpcclient`
 
-Outbound gRPC client with OTel tracing (stats handler), per-call logging, exponential-backoff retry on `Unavailable`/`DeadlineExceeded`/`ResourceExhausted`, and a named global registry.
-
-**Key types / functions**
-
-| Symbol | Description |
-|---|---|
-| `Dial(target, opts...) (*grpc.ClientConn, error)` | Open a lazy gRPC connection |
-| `Register(name, target, opts...) error` | Dial and store in the global registry |
-| `Get(name) *grpc.ClientConn` | Retrieve a named connection |
-| `CloseAll()` | Close all registered connections; call in `app.WithAfterStop` |
-| `Init(cfg, names...) error` | Bulk-register from config |
-
-**Usage**
-
 ```go
-import "github.com/pemako/mk/grpcclient"
-
-// Register at startup
-if err := grpcclient.Register("user-service", "user-service:9090",
-    grpcclient.WithInsecure(),
-    grpcclient.WithTimeout(5 * time.Second),
+grpcclient.Register("inventory", "inventory-svc:9090",
+    grpcclient.WithTLS(),
     grpcclient.WithRetry(3),
-); err != nil {
-    panic(err)
-}
-
-// Use anywhere
-conn := grpcclient.Get("user-service")
-client := pb.NewUserServiceClient(conn)
-resp, err := client.GetUser(ctx, &pb.GetUserRequest{Id: id})
-
-// Graceful shutdown — wire into app lifecycle
-app.New(
-    app.WithAfterStop(func(ctx context.Context) error {
-        grpcclient.CloseAll()
-        return nil
-    }),
 )
-```
+conn := grpcclient.Get("inventory")
+svc := pb.NewInventoryClient(conn)
 
-**Options**
-
-| Option | Default | Description |
-|---|---|---|
-| `WithInsecure()` | — | Plaintext transport (no TLS) |
-| `WithTLS(caCert)` | — | One-way TLS with CA certificate file |
-| `WithMTLS(cert, key, caCert)` | — | Mutual TLS |
-| `WithTimeout(d)` | `30s` | Per-call context deadline |
-| `WithRetry(n)` | `0` | Max retry attempts for retryable status codes |
-| `WithRetryBaseDelay(d)` | `100ms` | Exponential-backoff base delay |
-| `WithLogger(log)` | default logger | Logger for RPC call events |
-
-**Config**
-
-```yaml
-grpcclient:
-  user-service:
-    addr: "user-service:9090"
-    insecure: true
-    timeout: 5s
-    retry: 3
-  order-service:
-    addr: "order-service:9090"
-    insecure: true
-    timeout: 10s
+// Implements app.Closer for automatic CloseAll on shutdown
+app.WithCloser(grpcclient.NewRegistry())
 ```
 
 ---
 
 ### `lock`
 
-Distributed lock backed by Redis. Uses atomic Lua scripts for both acquire (SET NX PX) and release (compare-and-delete), preventing accidental release of a lock owned by another instance. All methods are safe for concurrent use.
-
-**Key types / functions**
-
-| Symbol | Description |
-|---|---|
-| `New(addr, opts...) *Locker` | Create a Locker with its own Redis connection |
-| `NewWithClient(rdb, opts...) *Locker` | Create a Locker using an existing `*redis.Client` |
-| `Locker.Acquire(ctx, key, ttl)` | Low-level: attempt once, returns `(bool, error)` |
-| `Locker.Release(ctx, key)` | Low-level: release if this Locker holds the token |
-| `Locker.TryLock(ctx, key, ttl, fn, opts...)` | Acquire, run fn, release; handles wait and auto-renew |
-| `ErrLockNotAcquired` | Returned when lock is already held and `WithWait` is not set |
-| `ErrLockExpired` | Returned when auto-renew detects the lock was lost mid-execution |
-
-**Usage**
-
 ```go
-import "github.com/pemako/mk/lock"
+locker := lock.NewWithClient(cache.RedisClient("redis"), lock.WithLogger(log))
 
-// Share an existing Redis client (e.g. from the cache package)
-locker := lock.NewWithClient(rdb, lock.WithLogger(log))
+// Try once
+if err := locker.Lock(ctx, "job:process", 30*time.Second); err != nil { ... }
+defer locker.Unlock(ctx, "job:process")
 
-// Simple try-once pattern
-err := locker.TryLock(ctx, "invoice:process:42", 30*time.Second, func(ctx context.Context) error {
-    return processInvoice(ctx, 42)
-})
-if errors.Is(err, lock.ErrLockNotAcquired) {
-    // Another instance is processing — skip silently
-    return nil
-}
-
-// Wait up to 5s for the lock, then auto-renew the TTL while processing
-err = locker.TryLock(ctx, "report:generate", 10*time.Second,
-    func(ctx context.Context) error {
-        return generateReport(ctx) // may take longer than 10s
-    },
-    lock.WithWait(5*time.Second, 200*time.Millisecond),
-    lock.WithAutoRenew(),
-)
-if errors.Is(err, lock.ErrLockExpired) {
-    log.Error(ctx, "lock lost during report generation")
-}
+// Wait up to 5s for the lock
+if err := locker.LockWait(ctx, "job:process", 30*time.Second, 5*time.Second); err != nil { ... }
 ```
-
-**Options**
-
-| Option | Description |
-|---|---|
-| `WithRedisPassword(pw)` | Redis AUTH password (for `New` only) |
-| `WithRedisDB(db)` | Redis logical DB index (for `New` only, default `0`) |
-| `WithLogger(log)` | Logger for acquire/release/renewal events |
-
-**TryLock options**
-
-| Option | Description |
-|---|---|
-| `WithWait(timeout, interval)` | Poll until the lock is free or timeout elapses |
-| `WithAutoRenew()` | Renew the lock TTL every `ttl/3` in the background |
 
 ---
 
 ### `cron`
 
-Cron scheduler that implements `core.Server` and integrates with the `app` lifecycle via `app.WithServer`. Supports standard 5-field cron syntax, robfig shorthands (`@hourly`, `@every 5m`, etc.), and sub-second intervals via a ticker. Each job gets panic recovery, optional timeout, optional retry with exponential backoff, and optional skip-if-running protection.
-
-**Key types / functions**
-
-| Symbol | Description |
-|---|---|
-| `New(opts...) *Scheduler` | Create a scheduler |
-| `Scheduler.Add(name, spec, fn, opts...)` | Register a named job |
-| `Scheduler.Remove(name)` | Unregister a job (in-flight execution finishes) |
-| `Scheduler.Start(ctx) error` | Implements `core.Server`; blocks until `Stop` |
-| `Scheduler.Stop(ctx) error` | Graceful shutdown; waits for running jobs up to ctx deadline |
-
-**Usage**
-
 ```go
-import "github.com/pemako/mk/cron"
+scheduler, _ := cron.New(cron.WithLogger(log), cron.WithLocation(time.UTC))
 
-scheduler := cron.New(cron.WithLogger(log))
-
-// Simple job — runs every 5 minutes
-scheduler.Add("cleanup", "@every 5m", func(ctx context.Context) error {
-    return cleanupExpiredSessions(ctx)
-})
-
-// Job with timeout, retries, and overlap protection
-scheduler.Add("report", "0 3 * * *",  // daily at 03:00 UTC
-    func(ctx context.Context) error {
-        return generateDailyReport(ctx)
-    },
-    cron.WithTimeout(10*time.Minute),
-    cron.WithRetries(2),
-    cron.WithRetryDelay(30*time.Second),
-    cron.WithSkipIfRunning(),
-)
-
-// Sub-second ticker (uses time.Ticker, not robfig)
-scheduler.Add("heartbeat", "@every 500ms", func(ctx context.Context) error {
-    return emitHeartbeat(ctx)
-})
-
-// Wire into app lifecycle — Start/Stop managed automatically
-app.New(
-    app.WithServer(httpSrv, grpcSrv, scheduler),
-)
-```
-
-**Scheduler options**
-
-| Option | Default | Description |
-|---|---|---|
-| `WithLogger(log)` | default logger | Logger for job lifecycle events |
-| `WithLocation(loc)` | `time.UTC` | Timezone for cron expression evaluation |
-
-**Per-job options**
-
-| Option | Default | Description |
-|---|---|---|
-| `WithTimeout(d)` | none | Cancel the job context after d |
-| `WithRetries(n)` | `0` | Max retry attempts on error |
-| `WithRetryDelay(d)` | `1s` | Base delay for exponential backoff between retries |
-| `WithSkipIfRunning()` | false | Skip the tick if a previous execution is still running |
-| `WithDistributedLock(locker, opts...)` | — | Acquire a Redis distributed lock before each run; skip tick if already held by another instance |
-
-**`WithDistributedLock` options**
-
-| Option | Description |
-|---|---|
-| `LockTTL(d)` | Explicit lock TTL (defaults to `WithTimeout` value, then `30s`) |
-| `LockKey(key)` | Custom Redis key (defaults to `"cron:<job-name>"`) |
-
-```go
-locker := lock.NewWithClient(cache.RedisClient("redis"))
-
-scheduler.Add("send-report", "@every 1h", fn,
+scheduler.Add("cleanup", "@every 1h",
+    func(ctx context.Context) error { return cleanupOldRecords(ctx) },
     cron.WithTimeout(5*time.Minute),
-    cron.WithDistributedLock(locker),  // TTL = 5min (from WithTimeout)
+    cron.WithRetry(3),
+    cron.WithSkipIfRunning(),
+    cron.WithDistributedLock(locker), // only one cluster node runs each tick
 )
-
-scheduler.Add("cleanup", "@every 5m", fn,
-    cron.WithDistributedLock(locker,
-        cron.LockTTL(3*time.Minute),
-        cron.LockKey("my-custom-cleanup-lock"),
-    ),
-)
-```
-
-**Log output**
-
-```json
-{"level":"info","msg":"cron start","job":"report"}
-{"level":"info","msg":"cron done","job":"report","elapsed":"2.341s"}
-{"level":"error","msg":"cron failed","job":"report","err":"context deadline exceeded","retry":0}
-{"level":"warn","msg":"cron skip","job":"report","reason":"still running"}
-```
-
----
-
-### `auth`
-
-JWT signing and verification with gin middleware. The framework handles HS256 signing, token parsing, and context storage. Business code defines its own `Claims` struct and manages its own secret.
-
-**Key API**
-
-| Symbol | Description |
-|---|---|
-| `Generate(claims, opts...) (string, error)` | Sign and return a JWT string using HS256 |
-| `Required(opts...) gin.HandlerFunc` | Middleware that requires a valid Bearer token; aborts with 401 otherwise |
-| `Optional(opts...) gin.HandlerFunc` | Middleware that parses the token if present; requests without a token continue normally |
-| `FromContext[T](ctx) (T, bool)` | Extract typed claims stored by `Required` or `Optional` |
-
-**Options**
-
-| Option | Description |
-|---|---|
-| `WithSecret(secret)` | HMAC signing secret for HS256 |
-| `WithKeyFunc(fn)` | Custom `jwt.Keyfunc` for key rotation |
-| `WithExpire(d)` | Token expiration duration (default 24h) |
-| `WithIssuer(iss)` | `iss` claim added to generated tokens |
-| `WithClaims(fn)` | Factory that returns a new empty claims instance for parsing |
-
-**Usage**
-
-```go
-// 1. Define your claims struct — embed jwt.RegisteredClaims to satisfy auth.Claims.
-type UserClaims struct {
-    jwt.RegisteredClaims
-    UserID int64  `json:"uid"`
-    Role   string `json:"role"`
-}
-
-// 2. Generate a token (e.g. in a login handler)
-token, err := auth.Generate(&UserClaims{
-    RegisteredClaims: jwt.RegisteredClaims{
-        ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
-    },
-    UserID: 42,
-    Role:   "admin",
-}, auth.WithSecret(cfg.GetString("auth.secret")))
-
-// 3. Protect a route group with middleware
-protected := r.Group("/api/v1")
-protected.Use(auth.Required(
-    auth.WithSecret(cfg.GetString("auth.secret")),
-    auth.WithClaims(func() auth.Claims { return &UserClaims{} }),
-))
-
-// 4. Extract claims inside a handler
-func GetMe(c *gin.Context) {
-    claims, ok := auth.FromContext[*UserClaims](c.Request.Context())
-    if !ok {
-        c.Error(errors.ErrUnAuth)
-        return
-    }
-    c.JSON(200, gin.H{"user_id": claims.UserID, "role": claims.Role})
-}
-```
-
-> Business code defines the `Claims` struct by embedding `jwt.RegisteredClaims`. The `auth` package never imports the struct — it receives a factory function via `WithClaims`.
-
----
-
-### `validate`
-
-Request binding and struct validation for gin handlers, backed by [go-playground/validator v10](https://github.com/go-playground/validator). All functions return a structured 400 `CodedError` with field-level details on failure — no raw `err.Error()` strings leak to callers.
-
-**Key API**
-
-| Function | Description |
-|---|---|
-| `Bind(c, obj)` | Bind by Content-Type (JSON or form) and validate |
-| `BindJSON(c, obj)` | Bind JSON body and validate |
-| `BindForm(c, obj)` | Bind form data and validate |
-| `BindQuery(c, obj)` | Bind query string parameters and validate |
-| `BindURI(c, obj)` | Bind URI path parameters and validate |
-| `Struct(obj)` | Validate a struct directly (no gin context needed) |
-| `Register(tag, fn)` | Register a custom validation tag |
-
-**Error response format**
-
-On validation failure, `BindJSON` (and all `Bind*` variants) return a `CodedError` that the `ErrorHandler` middleware serialises as:
-
-```json
-{
-  "code": 400,
-  "reason": "VALIDATION_FAILED",
-  "message": "validation failed",
-  "metadata": {
-    "email": "required",
-    "name": "min"
-  }
-}
-```
-
-**Usage**
-
-```go
-// Struct tags: `json`/`form`/`uri` for binding, `validate` for rules.
-type CreateUserReq struct {
-    Name  string `json:"name"  validate:"required,min=2"`
-    Email string `json:"email" validate:"required,email"`
-}
-
-// In a handler — replaces c.ShouldBindJSON + manual validation.
-func (h *UserHandler) Create(c *gin.Context) {
-    var req CreateUserReq
-    if err := validate.BindJSON(c, &req); err != nil {
-        c.Error(err)
-        return
-    }
-    // req is valid here
-}
-
-// Query params for a list endpoint.
-type ListReq struct {
-    Status string `form:"status" validate:"omitempty,oneof=active inactive"`
-}
-func (h *UserHandler) List(c *gin.Context) {
-    var q ListReq
-    if err := validate.BindQuery(c, &q); err != nil {
-        c.Error(err)
-        return
-    }
-}
-
-// URI path params.
-type GetReq struct {
-    ID int64 `uri:"id" validate:"required,min=1"`
-}
-func (h *UserHandler) Get(c *gin.Context) {
-    var p GetReq
-    if err := validate.BindURI(c, &p); err != nil {
-        c.Error(err)
-        return
-    }
-}
-```
-
----
-
-### `pagination`
-
-Standard page-number pagination helpers for list endpoints. Parses and normalises `page` and `page_size` query parameters, enforces defaults (page=1, page_size=20) and a hard cap (page_size≤100), and wraps results in a typed `Result[T]` envelope.
-
-**Key API**
-
-| Symbol | Description |
-|---|---|
-| `FromQuery(c) Params` | Parse pagination params from the gin query string |
-| `FromParams(page, pageSize) Params` | Construct `Params` from explicit values (service layer) |
-| `Offset(p) int` | Return the DB query offset: `(page - 1) * page_size` |
-| `New[T](total, data, p) Result[T]` | Wrap a page of results in the standard envelope |
-
-**Response envelope**
-
-```json
-{
-  "total": 142,
-  "page": 2,
-  "page_size": 20,
-  "data": [ ... ]
-}
-```
-
-**Usage**
-
-```go
-func (h *UserHandler) List(c *gin.Context) {
-    p := pagination.FromQuery(c)   // parses ?page=2&page_size=20, applies defaults
-
-    users, err := svc.List(ctx, pagination.Offset(p), p.PageSize)
-    if err != nil {
-        c.Error(err)
-        return
-    }
-    total, err := svc.Count(ctx)
-    if err != nil {
-        c.Error(err)
-        return
-    }
-
-    c.JSON(200, pagination.New(total, users, p))
-}
+app.WithServer(scheduler)            // scheduler implements core.Server
 ```
 
 ---
 
 ### `event`
 
-In-process publish/subscribe event bus for decoupling modules without shared state. Events are identified by a string topic. Handlers receive the payload as `any` and type-assert to the expected concrete type.
-
-**Key API**
-
-| Symbol | Description |
-|---|---|
-| `New(opts...) *Bus` | Create an isolated event bus |
-| `Bus.Subscribe(topic, handler)` | Register a `HandlerFunc` for a topic |
-| `Bus.Unsubscribe(topic)` | Remove all handlers for a topic |
-| `Bus.Publish(ctx, topic, payload) error` | Deliver payload to all registered handlers |
-| `Subscribe / Unsubscribe / Publish` | Package-level helpers using the default bus |
-| `WithAsync()` | Deliver events in background goroutines; handler errors are logged, not returned |
-
-**HandlerFunc signature**
-
 ```go
-type HandlerFunc func(ctx context.Context, payload any) error
-```
+// Always use instance — no package-level state
+bus := event.New()                       // synchronous
+bus := event.New(event.WithAsync())      // async (errors logged, not returned)
 
-**Usage**
-
-```go
-import "github.com/pemako/mk/event"
-
-bus := event.New()
-
-// Subscribe to an event
 bus.Subscribe("user.registered", func(ctx context.Context, payload any) error {
-    u := payload.(*User)
-    return mailer.SendWelcome(ctx, u.Email)
+    e := payload.(UserRegisteredEvent)
+    return mailer.SendWelcome(ctx, e.Email)
 })
 
-// Publish an event — blocks until all handlers return (synchronous default)
-err := bus.Publish(ctx, "user.registered", &User{ID: 1, Email: "alice@example.com"})
-
-// Async bus — Publish returns immediately; handler errors are logged
-asyncBus := event.New(event.WithAsync())
-asyncBus.Subscribe("order.placed", handleOrderPlaced)
-asyncBus.Publish(ctx, "order.placed", order) // non-blocking
-```
-
-> Default delivery is synchronous: `Publish` calls handlers in registration order and returns the first non-nil error, stopping the chain. Use `WithAsync` when callers must not block on slow side-effects.
-
----
-
-### `circuitbreaker`
-
-Protects outbound calls against cascading failures using the circuit breaker pattern. Wraps any operation via `Execute` and tracks consecutive failures.
-
-**State machine**
-
-```
-Closed ──(threshold failures)──► Open ──(timeout elapses)──► HalfOpen ──(probe success)──► Closed
-                                                                         └──(probe failure)──► Open
-```
-
-**Key API**
-
-| Symbol | Description |
-|---|---|
-| `New(name, opts...) *CircuitBreaker` | Create a circuit breaker |
-| `CircuitBreaker.Execute(ctx, fn) error` | Call fn if closed/half-open; returns `ErrOpen` immediately if open |
-| `CircuitBreaker.State() State` | Return current state (`StateClosed`, `StateOpen`, `StateHalfOpen`) |
-| `CircuitBreaker.Reset()` | Force-close the circuit and clear counters |
-| `ErrOpen` | Sentinel returned when the circuit is open |
-
-**Options**
-
-| Option | Default | Description |
-|---|---|---|
-| `WithThreshold(n)` | `5` | Consecutive failures required to open the circuit |
-| `WithTimeout(d)` | `30s` | How long the circuit stays open before trying half-open |
-| `WithOnStateChange(fn)` | — | Callback invoked on every state transition |
-
-**Usage**
-
-```go
-import (
-    "errors"
-    "github.com/pemako/mk/circuitbreaker"
-)
-
-cb := circuitbreaker.New("payment-service",
-    circuitbreaker.WithThreshold(5),
-    circuitbreaker.WithTimeout(30*time.Second),
-    circuitbreaker.WithOnStateChange(func(name string, from, to circuitbreaker.State) {
-        log.Printf("circuit %s: %s → %s", name, from, to)
-    }),
-)
-
-err := cb.Execute(ctx, func(ctx context.Context) error {
-    return paymentClient.Charge(ctx, req)
-})
-if errors.Is(err, circuitbreaker.ErrOpen) {
-    // Circuit is open — apply fallback or return a service-unavailable error
-    return cachedResult, nil
-}
-```
-
----
-
-### `storage`
-
-Unified object storage interface for Amazon S3, Alibaba Cloud OSS, and Tencent Cloud COS. All backends implement the same `Storage` interface, so provider migration requires only a config change.
-
-**Key API**
-
-| Symbol | Description |
-|---|---|
-| `New(opts...) (Storage, error)` | Create a storage backend |
-| `Register(name, opts...) error` | Create and store a named backend in the global registry |
-| `Get(name) Storage` | Retrieve a named backend |
-| `Storage.Upload(ctx, key, r, opts...) (string, error)` | Upload from reader; returns public URL |
-| `Storage.Download(ctx, key) (io.ReadCloser, error)` | Download as a ReadCloser (caller must close) |
-| `Storage.Delete(ctx, key) error` | Delete an object (missing keys silently ignored) |
-| `Storage.Exists(ctx, key) (bool, error)` | Check if an object exists |
-| `Storage.PresignURL(ctx, key, expire) (string, error)` | Generate a temporary signed URL |
-
-**Options**
-
-| Option | Description |
-|---|---|
-| `WithProvider(p)` | Backend: `"s3"`, `"oss"`, or `"cos"` |
-| `WithRegion(r)` | Cloud region (e.g. `"us-east-1"`, `"cn-hangzhou"`) |
-| `WithBucket(b)` | Bucket name |
-| `WithAccessKey(key, secret)` | Access key ID and secret |
-| `WithEndpoint(url)` | Custom endpoint for S3-compatible services or private deployments |
-| `WithConfig(cfg)` | Read all settings from `core.Config` |
-
-**Config**
-
-```yaml
-# S3
-storage:
-  provider: s3
-  region: us-east-1
-  bucket: my-bucket
-  access_key: "AKIAIOSFODNN7EXAMPLE"
-  secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-
-# Alibaba Cloud OSS
-storage:
-  provider: oss
-  region: cn-hangzhou
-  bucket: my-bucket
-  access_key: "your-access-key-id"
-  secret_key: "your-access-key-secret"
-  endpoint: "https://oss-cn-hangzhou.aliyuncs.com"
-
-# Tencent Cloud COS
-storage:
-  provider: cos
-  region: ap-guangzhou
-  bucket: my-bucket-1234567890
-  access_key: "your-secret-id"
-  secret_key: "your-secret-key"
-```
-
-**Usage**
-
-```go
-import "github.com/pemako/mk/storage"
-
-store, err := storage.New(
-    storage.WithProvider("s3"),
-    storage.WithRegion("us-east-1"),
-    storage.WithBucket("my-bucket"),
-    storage.WithAccessKey("key-id", "secret"),
-)
-if err != nil {
-    panic(err)
-}
-
-// Upload a file
-url, err := store.Upload(ctx, "avatars/user-1.jpg", reader,
-    storage.WithContentType("image/jpeg"),
-)
-
-// Generate a pre-signed download URL valid for 1 hour
-presigned, err := store.PresignURL(ctx, "avatars/user-1.jpg", time.Hour)
+err := bus.Publish(ctx, "user.registered", UserRegisteredEvent{Email: "a@b.com"})
+bus.Unsubscribe("user.registered")
 ```
 
 ---
 
 ### `stream`
 
-Distributed pub/sub and work-queue messaging backed by Redis Streams (requires Redis 5.0+). Two delivery modes are supported: work-queue (one instance processes each message) and broadcast (every instance receives each message).
-
-The package takes a `*redis.Client` directly. The recommended pattern is to share the connection via `cache.RedisClient` to avoid duplicating the Redis address in config.
-
-**Key API**
-
-| Symbol | Description |
-|---|---|
-| `Init(client, opts...)` | Set the Redis client; call once before Publish/Subscribe/Worker |
-| `Publish(ctx, topic, payload) error` | JSON-marshal payload and write to the named stream |
-| `Subscribe(topic, opts...)` | Register a handler for the topic (call before `Worker().Start`) |
-| `Worker(log...) *streamWorker` | Returns a `core.Server` — add to `app.WithServer` |
-| `Message.Decode(dest) error` | Unmarshal the message payload into a typed value |
-| `ResetSubs()` | Clear all subscriptions (tests only) |
-
-**Two modes**
-
-| Mode | Option | Behaviour |
-|---|---|---|
-| Work queue | `WithGroup("name")` | All instances share the group; Redis delivers each message to exactly one instance |
-| Broadcast | `WithBroadcast()` | Each instance joins a unique group derived from hostname; every instance receives every message |
-
-**Config pattern**
-
-```yaml
-cache:
-  default:
-    backend: memory       # regular cache
-  redis:
-    backend: redis        # shared for lock + stream
-    addr: "redis:6379"
-    password: ""
-    db: 0
-```
-
 ```go
-// main.go — share the Redis connection registered in the cache package
-cache.Init(cache.WithConfig(cfg))
-stream.Init(cache.RedisClient("redis"))
+// New returns (*Bus, error) — nil client is rejected
+bus, _ := stream.New(
+    cache.RedisClient("redis"),
+    stream.WithLogger(log),
+    stream.WithMaxLen(10_000),
+)
 
-// Work queue — one instance processes each message
-stream.Subscribe("order.created",
-    stream.WithGroup("order-service"),
+// Register subscriptions before starting Worker
+bus.Subscribe("order.created",
+    stream.WithGroup("order-service"),     // work-queue: one instance processes each message
     stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
-        var e OrderEvent
-        _ = msg.Decode(&e)
-        return processOrder(ctx, e)
+        var order Order
+        msg.Decode(&order)
+        return processOrder(ctx, order)
     }),
     stream.WithRetries(3),
-    stream.WithConcurrency(2),
+)
+bus.Subscribe("audit.event",
+    stream.WithBroadcast(),                // every instance receives each message
+    stream.WithHandler(auditHandler),
 )
 
-// Broadcast — every instance receives each message
-stream.Subscribe("config.reload",
-    stream.WithBroadcast(),
-    stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
-        return reloadConfig(ctx)
-    }),
-)
-
-// Wire the stream worker into the app lifecycle
-app.New(
-    app.WithServer(httpSrv, grpcSrv, scheduler, stream.Worker()),
-)
+app.WithServer(bus.Worker())              // Worker implements core.Server
+bus.Publish(ctx, "order.created", order)
 ```
-
-**Publish**
-
-```go
-// Publish from anywhere — payload is JSON-marshalled automatically
-if err := stream.Publish(ctx, "order.created", &OrderEvent{ID: 42}); err != nil {
-    log.Error(ctx, "publish failed", logger.F("err", err))
-}
-```
-
-**Dead-letter stream**
-
-Messages that fail all retry attempts are moved to `<topic>:dead` as a Redis Stream entry for manual inspection or reprocessing.
-
-**`Init` options**
-
-| Option | Default | Description |
-|---|---|---|
-| `WithLogger(log)` | default logger | Logger for stream worker events |
-| `WithMaxLen(n)` | `10_000` | Approximate maximum entries retained per stream via MAXLEN trimming |
-
-**`Subscribe` options**
-
-| Option | Default | Description |
-|---|---|---|
-| `WithGroup(name)` | topic name | Consumer group name; all instances sharing the name form a work queue |
-| `WithBroadcast()` | — | Each instance joins a unique group; mutually exclusive with `WithGroup` |
-| `WithConsumer(name)` | hostname | Consumer name within the group; must be unique per instance |
-| `WithHandler(fn)` | — | Message processing function (required) |
-| `WithRetries(n)` | `0` | Max retries before moving to `<topic>:dead` |
-| `WithRetryDelay(d)` | `1s` | Base delay between retries |
-| `WithConcurrency(n)` | `1` | Number of goroutines reading from this subscription |
 
 ---
 
-### `notify` Configure one or more channels at startup; then call `Send` with a `Message` specifying which channels to use.
-
-**Key API**
-
-| Symbol | Description |
-|---|---|
-| `New(opts...) (*Notifier, error)` | Create a Notifier with configured channels |
-| `Notifier.Send(ctx, msg) error` | Dispatch the message; returns first error |
-| `Message` | Notification payload: `To`, `Subject`, `Body`, `Channels` |
-| `Email`, `SMS`, `DingTalk`, `WeCom`, `Feishu` | `Channel` constants |
-
-**Options**
-
-| Option | Description |
-|---|---|
-| `WithEmail(EmailConfig)` | Register Email via SMTP (`Host`, `Port`, `Username`, `Password`) |
-| `WithSMS(SMSConfig)` | Register SMS via Alibaba Cloud (`AccessKey`, `SecretKey`, `SignName`, `TemplateCode`) |
-| `WithDingTalk(webhookURL)` | Register DingTalk robot webhook |
-| `WithWeCom(webhookURL)` | Register WeChat Work robot webhook |
-| `WithFeishu(webhookURL)` | Register Feishu (Lark) robot webhook |
-
-**Usage**
+### `auth`
 
 ```go
-import "github.com/pemako/mk/notify"
-
-n, err := notify.New(
-    notify.WithEmail(notify.EmailConfig{
-        Host:     "smtp.example.com",
-        Port:     465,
-        Username: "no-reply@example.com",
-        Password: "smtp-password",
-    }),
-    notify.WithDingTalk("https://oapi.dingtalk.com/robot/send?access_token=xxx"),
-    notify.WithWeCom("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"),
-    notify.WithFeishu("https://open.feishu.cn/open-apis/bot/v2/hook/xxx"),
-)
-if err != nil {
-    panic(err)
+type Claims struct {
+    jwt.RegisteredClaims
+    UserID int64  `json:"user_id"`
+    Role   string `json:"role"`
 }
 
-// Send to specific channels
-err = n.Send(ctx, notify.Message{
-    To:      []string{"ops@example.com"},
-    Subject: "Deployment alert",
-    Body:    "## Deploy succeeded\nService `my-service` v1.2.3 is live.",
-    Channels: []notify.Channel{notify.Email, notify.DingTalk},
-})
+signer, _ := auth.NewSigner[Claims](auth.WithSecret("my-secret"), auth.WithTTL(24*time.Hour))
+token, _ := signer.Sign(Claims{UserID: 42, Role: "admin"})
 
-// Send to all configured channels (omit Channels field)
-err = n.Send(ctx, notify.Message{
-    Body: "Heartbeat check passed",
+r.POST("/login", func(c *gin.Context) {
+    c.JSON(200, gin.H{"token": token})
+})
+r.GET("/profile", auth.Required[Claims](signer), func(c *gin.Context) {
+    claims := auth.FromContext[Claims](c)
+    c.JSON(200, claims)
 })
 ```
 
-> Webhook channels (DingTalk, WeCom, Feishu) use HTTP POST with a JSON body — no SDK or credential setup beyond the webhook URL is required.
+---
+
+### `validate`
+
+```go
+type CreateUserReq struct {
+    Name  string `json:"name"  validate:"required,min=2,max=64"`
+    Email string `json:"email" validate:"required,email"`
+}
+
+r.POST("/users", func(c *gin.Context) {
+    var req CreateUserReq
+    if err := validate.BindJSON(c, &req); err != nil {
+        return // ErrorHandler middleware writes 400 with field-level details
+    }
+    // req is valid
+})
+```
 
 ---
+
+### `pagination`
+
+```go
+r.GET("/users", func(c *gin.Context) {
+    p := pagination.FromQuery(c)          // ?page=2&page_size=20
+    offset := pagination.Offset(p)       // (page-1) * page_size
+    var users []User
+    db.Limit(p.PageSize).Offset(offset).Find(&users)
+    total := db.Model(&User{}).Count()
+    c.JSON(200, pagination.New(users, total, p))
+})
+```
+
+---
+
+### `idgen`
+
+```go
+// Explicit worker ID (required in production — auto-derived ID is unstable in containers)
+gen, _ := idgen.New(idgen.WithWorkerID(cfg.GetInt64("idgen.worker_id")))
+idgen.Register("default", gen)
+
+id := idgen.Get("default").Next()         // int64 snowflake ID
+idStr := idgen.Get("default").NextString() // decimal string
+
+ulid := idgen.ULID()                       // time-sortable string, no registration needed
+```
+
+> ⚠️ In production, always set `idgen.worker_id` in config. Without it, the worker ID is derived from the host's primary IP, which is unstable in containerized environments and may cause ID collisions across instances.
+
+---
+
+### `circuitbreaker`
+
+```go
+cb := circuitbreaker.New(
+    circuitbreaker.WithThreshold(5),           // trips after 5 consecutive failures
+    circuitbreaker.WithTimeout(30*time.Second), // half-open probe after 30s
+    circuitbreaker.WithLogger(log),
+)
+
+err := cb.Execute(ctx, func(ctx context.Context) error {
+    return externalService.Call(ctx, payload)
+})
+// err == circuitbreaker.ErrOpen when the breaker is tripped
+```
+
+---
+
+### `storage`
+
+```go
+storage.Register("avatars",
+    storage.WithS3(storage.S3Config{
+        Bucket: "my-avatars", Region: "us-east-1",
+        AccessKey: cfg.GetString("storage.access_key"),
+        SecretKey: cfg.GetString("storage.secret_key"),
+    }),
+)
+
+s := storage.Get("avatars")
+err := s.Put(ctx, "user/42/avatar.png", reader, size, "image/png")
+url, _ := s.GetURL(ctx, "user/42/avatar.png", time.Hour)
+err = s.Delete(ctx, "user/42/avatar.png")
+```
+
+---
+
+### `notify`
+
+```go
+n := notify.New(notify.WithConfig(cfg))
+
+// Email
+n.SendEmail(ctx, notify.Email{
+    To:      []string{"alice@example.com"},
+    Subject: "Welcome",
+    Body:    "<h1>Hello</h1>",
+})
+
+// DingTalk webhook
+n.SendDingTalk(ctx, notify.DingTalk{Content: "Deploy succeeded"})
+
+// WeCom webhook
+n.SendWeCom(ctx, notify.WeCom{Content: "Deploy succeeded"})
+
+// Feishu webhook
+n.SendFeishu(ctx, notify.Feishu{Content: "Deploy succeeded"})
+```
+
+---
+
+### `pprof`
+
+```go
+// Option A: standalone server on a dedicated port
+pprofSrv := pprof.New(pprof.WithAddr(":6060"), pprof.WithLogger(log))
+app.WithServer(pprofSrv)   // implements core.Server
+
+// Option B: mount on existing gin.Engine
+pprof.Register(r)          // adds /debug/pprof/* routes
+```
+
+---
+
+### `ratelimit`
+
+```go
+// In-process token bucket
+lim := ratelimit.NewTokenBucket(100, 10) // 100 req/s, burst 10
+
+// Distributed Redis fixed-window
+lim := ratelimit.NewRedisFixedWindow(cache.RedisClient("redis"), "api", 1000, time.Minute)
+
+// Use as middleware
+r.Use(mw.RateLimit(lim))
+```
+
+---
+
+### `testutil`
+
+```go
+port := testutil.FreePort()                            // random available TCP port
+cfg  := testutil.NewConfig(map[string]any{             // stub core.Config
+    "server.http.addr": ":8081",
+})
+log  := testutil.NewLogger(t)                          // writes to t.Log
+```
 
 ## Middleware Reference
 
-### HTTP Middleware (`middleware/http`)
-
-All middleware in the table below is available as `gin.HandlerFunc`. The first six are mounted automatically by `httpserver.New`; the rest are opt-in.
-
-| Middleware | Function | Notes |
-|---|---|---|
-| RequestID | `RequestID()` | Sets `X-Request-ID`; generates UUID if absent |
-| Tracing | `Tracing(serviceName)` | Creates OTel span per request via otelgin |
-| Logger | `Logger(log)` | Logs method, path, status, latency; injects request_id |
-| Metrics | `Metrics()` | Records `http_requests_total`, `http_request_duration_seconds`, `http_requests_in_flight`; no-op until `metric.Init` |
-| Recovery | `Recovery()` | Recovers panics, returns 500 |
-| ErrorHandler | `ErrorHandler()` | Converts `*errors.CodedError` to JSON response |
-| CORS | `CORS(CORSConfig)` | Configurable origin, methods, headers, max-age |
-| RateLimit | `RateLimit(RateLimitConfig)` | Per-key token bucket; default key is client IP |
-| IPFilter | `IPFilter(IPFilterConfig)` | Whitelist or blacklist by IP or CIDR |
-| BodyLimit | `BodyLimit(size)` | Limit request body size, e.g. `"8MB"` |
-| Timeout | `Timeout(duration)` | Context deadline per request; 503 on expiry |
-
-**CORS example**
+### HTTP Error Handling Pattern
 
 ```go
-r.Use(httpMiddleware.CORS(httpMiddleware.CORSConfig{
-    AllowOrigins: []string{"https://app.example.com"},
-    AllowMethods: []string{"GET", "POST", "PUT", "DELETE"},
-    AllowHeaders: []string{"Authorization", "Content-Type"},
-    MaxAge:       12 * time.Hour,
-}))
-```
-
-**Rate limit example**
-
-```go
-r.Use(httpMiddleware.RateLimit(httpMiddleware.RateLimitConfig{
-    Rate:  100,  // requests per second
-    Burst: 20,
-    // optional: custom key function
-    KeyFunc: func(c *gin.Context) string { return c.GetHeader("X-API-Key") },
-}))
-```
-
-### gRPC Middleware (`middleware/grpc`)
-
-All interceptors are `grpc.UnaryServerInterceptor` unless noted. The first five are mounted automatically by `grpcserver.New`; tracing is a `StatsHandler`.
-
-| Middleware | Function | Notes |
-|---|---|---|
-| Tracing | `ServerTracingHandler()` | OTel span per RPC via otelgrpc StatsHandler |
-| RequestID | `UnaryRequestID` | Propagates or generates a request ID in metadata |
-| Logger | `UnaryLogger(log)` | Logs method, status, latency |
-| Metrics | `UnaryMetrics()` | Records `grpc_requests_total`, `grpc_request_duration_seconds`, `grpc_requests_in_flight` |
-| Recovery | `UnaryRecovery` | Recovers panics, returns `codes.Internal` |
-| ErrorHandler | `UnaryErrorHandler` | Converts `*errors.CodedError` to gRPC status |
-| RateLimit | `UnaryRateLimit(GRPCRateLimitConfig)` | Per-key token bucket; default key is peer address |
-| IPFilter | `UnaryIPFilter(GRPCIPFilterConfig)` | Whitelist or blacklist by IP or CIDR |
-| Timeout | `UnaryTimeout(duration)` | Context deadline per RPC |
-
-**Adding optional interceptors**
-
-```go
-grpc.NewServer(
-    grpc.ChainUnaryInterceptor(
-        grpcMiddleware.UnaryRequestID,
-        grpcMiddleware.UnaryLogger(log),
-        grpcMiddleware.UnaryMetrics(),
-        grpcMiddleware.UnaryRecovery,
-        grpcMiddleware.UnaryErrorHandler,
-        grpcMiddleware.UnaryRateLimit(grpcMiddleware.GRPCRateLimitConfig{
-            Rate: 500, Burst: 50,
-        }),
-        grpcMiddleware.UnaryTimeout(10 * time.Second),
-    ),
-)
-```
-
-## Error Handling
-
-Define package-level sentinel errors with `errors.Define`, then use `errors.Wrap` to attach call-site context before returning. The HTTP and gRPC error-handler middleware automatically converts `*errors.CodedError` to the appropriate response format.
-
-```go
-package users
-
-import "github.com/pemako/mk/errors"
-
-var (
-    ErrNotFound  = errors.Define(404, "USER_NOT_FOUND",  "user not found")
-    ErrDuplicate = errors.Define(409, "USER_DUPLICATE",  "user already exists")
-)
-
-func Create(ctx context.Context, req *CreateRequest) (*User, error) {
-    if exists(req.Email) {
-        return nil, errors.Wrap(ErrDuplicate, "email=%s", req.Email)
+// ✅ Correct — use c.Error(); ErrorHandler writes the response
+r.GET("/users/:id", func(c *gin.Context) {
+    user, err := svc.GetUser(ctx, id)
+    if err != nil {
+        c.Error(err)   // err should be a *errors.CodedError
+        return
     }
-    // ...
+    c.JSON(200, user)
+})
+
+// ❌ Wrong — bypasses ErrorHandler, no structured response
+r.GET("/users/:id", func(c *gin.Context) {
+    c.JSON(500, gin.H{"error": err.Error()})
+})
+```
+
+### HTTP Middleware Stack Warning
+
+`httpserver.New()` mounts the full default middleware stack. Never add the same middleware again:
+
+```go
+srv, _ := httpserver.New(...)
+r := srv.Engine()
+// ❌ Wrong — ErrorHandler already in the stack; this causes duplicate JSON responses
+r.Use(mw.ErrorHandler())
+// ✅ Correct — just register routes
+r.GET("/hello", handler)
+```
+
+## Error Handling Convention
+
+```go
+// Package-level sentinels (exported vars)
+var ErrUserNotFound = errors.Define(404, "USER_NOT_FOUND", "user not found")
+var ErrDuplicate    = errors.Define(409, "USER_DUPLICATE", "user already exists")
+
+// Service layer
+func (s *UserService) Get(ctx context.Context, id int64) (*User, error) {
+    u, err := s.repo.FindByID(ctx, id)
+    if err != nil {
+        return nil, errors.Wrap(ErrUserNotFound, "get user %d: %w", id, err)
+    }
+    return u, nil
 }
 
-// In a Gin handler — no explicit status code needed:
-func createHandler(c *gin.Context) {
-    user, err := users.Create(c.Request.Context(), req)
+// Handler
+func (h *UserHandler) Get(c *gin.Context) {
+    id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+    user, err := h.svc.Get(c.Request.Context(), id)
     if err != nil {
-        c.Error(err) // ErrorHandler middleware picks this up
+        c.Error(err)   // ErrorHandler middleware converts to JSON
         return
     }
     c.JSON(200, user)
 }
 ```
 
-The HTTP error handler writes:
-
-```json
-{"code": 409, "reason": "USER_DUPLICATE", "message": "user already exists"}
-```
-
-`errors.Is(err, ErrDuplicate)` returns `true` across `Wrap` boundaries because `CodedError.Is` matches on `Reason`.
-
-## Log Masking
-
-Fields whose names appear in `logger.mask_fields` (case-insensitive) have their string values partially redacted before writing. Short values (four characters or fewer) become `***`; longer values keep the first and last quarter, with `***` in the middle.
-
-```yaml
-logger:
-  mask_fields:
-    - password
-    - token
-    - api_key
-```
-
-```go
-log.Info(ctx, "auth", logger.F("password", "mypassword"))
-// output: {..., "password": "myp***ord"}
-
-log.Info(ctx, "auth", logger.F("token", "ab"))
-// output: {..., "token": "***"}
-```
-
-Masking is applied at log time inside the logger — the original value in your struct is never modified.
-
-## Log Level File Splitting
-
-When `output` is `file` or `both`, the logger writes one file per level instead of a single combined file. Given `filename: /var/log/app`, the following files are created:
-
-| File | Contains |
-|---|---|
-| `/var/log/app.debug.log` | `DEBUG` entries only |
-| `/var/log/app.info.log` | `INFO` entries only |
-| `/var/log/app.warn.log` | `WARN` entries only |
-| `/var/log/app.error.log` | `ERROR`, `DPANIC`, `PANIC`, `FATAL` entries |
-
-Files below the configured minimum level are not created. For example, with `level: warn`, only `warn.log` and `error.log` are written.
-
-Each file is managed by lumberjack and rotated according to `max_size`, `max_age`, and `max_backups`.
-
-```yaml
-logger:
-  level: info
-  output: both          # write to stdout AND files simultaneously
-  filename: /var/log/myapp
-  max_size: 200         # MB
-  max_age: 14           # days
-  max_backups: 5
-```
-
-## Database Migrations
-
-`database.Manager` implements `app.Migrator`. When passed to `app.WithMigration`, migrations run automatically before any server starts. The migrator uses [goose v3](https://github.com/pressly/goose) and supports MySQL, Postgres, and SQLite.
-
-**Directory layout**
-
-```
-migrations/
-  00001_create_users.sql
-  00002_add_email_index.sql
-```
-
-**SQL migration file format**
-
-```sql
--- +goose Up
-CREATE TABLE users (
-    id   BIGINT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL
-);
-
--- +goose Down
-DROP TABLE users;
-```
-
-**Using the migrator directly**
-
-```go
-dbMgr, _ := database.New(
-    database.WithDriver("default", "postgres", dsn),
-    database.WithMigrationsDir("migrations"),
-)
-
-// Run all pending migrations
-dbMgr.Up(ctx)
-
-// Use the lower-level Migrator for more control
-m := database.NewMigrator(database.DB("default"), "migrations")
-m.Up(ctx)                  // apply all pending
-m.Down(ctx)                // roll back the last migration
-m.UpTo(ctx, 3)             // apply up to version 3
-version, _ := m.Status(ctx) // current applied version
-```
-
-When `app.WithMigration(dbMgr)` is used, `Up` is called on every named connection that has a migrations directory configured.
-
 ## Project Structure
 
 ```
-github.com/pemako/mk/
-├── app/                    # Application lifecycle runner
-│   ├── app.go              # App struct and Run method
-│   └── options.go          # WithServer, WithMigration, WithBeforeStart, etc.
-├── cache/                  # Cache client manager (memory + Redis)
-│   ├── cache.go            # Cache interface, Init, Client, registry
-│   ├── memory.go           # In-memory backend with TTL and cleanup
-│   ├── redis.go            # Redis backend with slow-command hook
-│   └── options.go          # WithMemory, WithRedis, WithRedisAuth, WithConfig
-├── config/                 # Viper-backed config loader
-│   ├── config.go           # Load, viperConfig implementation
-│   └── options.go          # WithFile, WithEnv, WithWatch
-├── core/                   # Shared interfaces (no external deps)
-│   ├── config.go           # Config interface
-│   ├── logger.go           # Logger interface and Field type
-│   ├── server.go           # Server interface
-│   └── tracer.go           # Provider interface
-├── database/               # GORM connection manager + goose migrations
-│   ├── config.go           # DSNConfig struct
-│   ├── database.go         # Manager, New, DB registry
-│   ├── migrate.go          # Migrator: Up, Down, UpTo, Status
-│   ├── options.go          # WithDriver, WithConfig, WithMigrationsDir
-│   └── plugin.go           # OTel tracing plugin for GORM
-├── errors/                 # Structured CodedError
-│   └── errors.go           # Define, Wrap, Code, Reason, predefined sentinels
-├── logger/                 # Zap-backed structured logger
-│   ├── logger.go           # New, zapLogger, level-split file cores, masking
-│   └── options.go          # WithLevel, WithOutput, WithMaskFields, WithConfig
-├── metric/                 # OTel metrics (Prometheus + OTLP)
-│   ├── metric.go           # Init, Shutdown, Prometheus server
-│   ├── helpers.go          # Count, Gauge, StartTimer, Duration
-│   └── options.go          # WithPrometheusAddr, WithOTLPEndpoint, WithConfig
-├── middleware/
-│   ├── http/               # Gin middleware
-│   │   ├── requestid.go
-│   │   ├── tracing.go
-│   │   ├── logger.go
-│   │   ├── metrics.go      # Metrics() + RegisterHTTPMetricHooks
-│   │   ├── recovery.go
-│   │   ├── error_handler.go
-│   │   ├── cors.go
-│   │   ├── rate_limit.go
-│   │   ├── ip_filter.go
-│   │   ├── body_limit.go
-│   │   └── timeout.go
-│   └── grpc/               # gRPC unary interceptors
-│       ├── requestid.go
-│       ├── tracing.go
-│       ├── logger.go
-│       ├── metrics.go      # UnaryMetrics() + RegisterGRPCMetricHooks
-│       ├── recovery.go
-│       ├── error_handler.go
-│       ├── rate_limit.go
-│       ├── ip_filter.go
-│       └── timeout.go
+mk/
+├── core/              # shared interfaces — zero deps on other mk packages
+├── errors/            # CodedError — zero deps on other mk packages
+├── app/               # lifecycle manager
+├── config/            # Viper config loader
+├── logger/            # Zap structured logger
+├── tracing/           # OTel trace provider
+├── metric/            # OTel metrics
 ├── server/
-│   ├── http/               # Gin HTTP server
-│   │   ├── server.go       # New, Engine, Start, Stop, health routes
-│   │   └── options.go      # WithAddr, WithLogger, WithConfig
-│   └── grpc/               # gRPC server
-│       ├── server.go       # New, Server, Start, Stop, health service
-│       └── options.go      # WithAddr, WithTLS, WithConfig
-├── tracing/                # OTel OTLP trace provider
-│   ├── provider.go         # New, Provider.Tracer, Provider.Shutdown
-│   └── options.go          # WithEndpoint, WithSampler, WithConfig
-├── httpclient/             # Outbound HTTP client with OTel tracing and retry
-│   ├── client.go           # New, Get/Post/Put/Delete, Do, Register, Get, Init
-│   ├── options.go          # WithBaseURL, WithTimeout, WithRetry, WithHeader, WithLogger
-│   └── retry.go            # shouldRetry, backoffDelay
-├── grpcclient/             # Outbound gRPC client with OTel tracing and retry
-│   ├── client.go           # Dial, Register, Get, CloseAll, Init
-│   ├── options.go          # WithInsecure, WithTLS, WithMTLS, WithTimeout, WithRetry
-│   └── interceptors.go     # unaryLoggerInterceptor, unaryRetryInterceptor
-├── lock/                   # Distributed lock backed by Redis
-│   ├── lock.go             # Locker, New, NewWithClient, Acquire, Release, TryLock
-│   ├── options.go          # WithRedisPassword, WithRedisDB, WithLogger, WithWait, WithAutoRenew
-│   └── errors.go           # ErrLockNotAcquired, ErrLockExpired
-├── cron/                   # Cron scheduler (core.Server)
-│   ├── cron.go             # Scheduler, New, Add, Remove, Start, Stop
-│   ├── options.go          # WithLogger, WithLocation, WithTimeout, WithRetries, WithSkipIfRunning
-│   └── job.go              # executeJob, runOnce, cronBackoff
-├── auth/                   # JWT signing/verification + gin middleware
-│   ├── auth.go             # Generate, Required, Optional, FromContext
-│   └── options.go          # WithSecret, WithKeyFunc, WithExpire, WithIssuer, WithClaims
-├── validate/               # Request binding + struct validation
-│   └── validate.go         # Bind, BindJSON, BindForm, BindQuery, BindURI, Struct, Register
-├── pagination/             # Page-number pagination helpers
-│   └── pagination.go       # Params, Result[T], FromQuery, FromParams, Offset, New
-├── event/                  # In-process pub/sub event bus
-│   └── event.go            # Bus, New, Subscribe, Unsubscribe, Publish, WithAsync, default bus
-├── circuitbreaker/         # Circuit breaker pattern
-│   ├── circuitbreaker.go   # CircuitBreaker, New, Execute, State, Reset, ErrOpen
-│   └── options.go          # WithThreshold, WithTimeout, WithOnStateChange
-├── storage/                # Unified object storage (S3 / OSS / COS)
-│   ├── storage.go          # Storage interface, New, Register, Get, WithProvider/Region/Bucket/...
-│   ├── s3.go               # Amazon S3 backend
-│   ├── oss.go              # Alibaba Cloud OSS backend
-│   └── cos.go              # Tencent Cloud COS backend
-├── notify/                 # Multi-channel notification dispatcher
-│   ├── notify.go           # Notifier, New, Send, Message, Channel constants
-│   ├── options.go          # WithEmail, WithSMS, WithDingTalk, WithWeCom, WithFeishu
-│   ├── email.go            # SMTP sender
-│   ├── sms.go              # Alibaba Cloud SMS sender
-│   └── webhook.go          # DingTalk / WeCom / Feishu webhook sender
-├── stream/                 # Distributed pub/sub and work-queue (Redis Streams)
-│   ├── stream.go           # Init, Publish, Subscribe, Worker, Message, ResetSubs
-│   ├── options.go          # InitOption, SubOption, WithGroup, WithBroadcast, WithHandler, etc.
-│   └── worker.go           # streamWorker implementing core.Server
-├── pprof/                  # pprof profiling endpoints
-│   ├── pprof.go            # New (core.Server), Register (gin.Engine mount), Start, Stop
-│   └── options.go          # WithAddr, WithLogger, WithMutexFraction, WithBlockRate, WithConfig
-└── example/                # Runnable reference application
-    ├── main.go
-    ├── config.yaml
-    └── internal/
-        ├── handler/http/   # HTTP route handlers
-        ├── model/          # Data models and JWT claims
-        ├── repository/     # Database access layer
-        └── service/        # Business logic
+│   ├── http/          # Gin HTTP server
+│   └── grpc/          # gRPC server
+├── middleware/
+│   ├── http/          # HTTP middleware
+│   └── grpc/          # gRPC unary interceptors
+├── database/          # GORM wrapper
+├── cache/             # Cache manager (memory + Redis)
+├── httpclient/        # Outbound HTTP client
+├── grpcclient/        # Outbound gRPC client
+├── lock/              # Redis distributed lock
+├── cron/              # Cron scheduler
+├── event/             # In-process pub/sub
+├── stream/            # Redis Streams pub/sub
+├── auth/              # JWT authentication
+├── validate/          # Request validation
+├── pagination/        # Pagination helpers
+├── circuitbreaker/    # Circuit breaker
+├── storage/           # Object storage
+├── notify/            # Notification dispatch
+├── pprof/             # Profiling endpoints
+├── idgen/             # ID generation
+├── ratelimit/         # Rate limiting
+├── testutil/          # Test helpers
+├── example/
+│   ├── quickstart/    # Minimal HTTP service (start here)
+│   └── full/          # Full-featured demo service
+├── ARCHITECTURE.md    # Design guide
+├── CLAUDE.md          # Claude Code guidance
+└── Makefile
 ```

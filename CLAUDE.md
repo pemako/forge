@@ -25,9 +25,10 @@ go vet ./...
 # Lint (golangci-lint v1.x required)
 golangci-lint run ./...
 
-# Build and run the quickstart example
+# Build and run the quickstart example (random port, no external deps)
 cd example/quickstart && go build ./... && go run .
-# Build and run the full example
+
+# Build and run the full example (requires config.yaml with database/cache/etc.)
 cd example/full && go build ./... && go run .
 ```
 
@@ -37,24 +38,27 @@ After finishing any task that adds or modifies a package — before considering 
 
 1. **`CLAUDE.md`** — does the Package inventory list need updating? Are there new patterns, conventions, or cross-package rules introduced by this change?
 2. **`README.md`** — does the Features table or Package Reference section need a new row or updated description?
-3. **`example/`** — does the example service demonstrate the new or changed API? Add or update `example/full/` code to show the key usage. For significant API changes, also check if `example/quickstart/` needs updating.
+3. **`ARCHITECTURE.md`** — do any architecture rules or patterns need updating?
+4. **`example/`** — does `example/full/` demonstrate the new or changed API? For significant API changes, also check if `example/quickstart/` needs updating.
 
-If any of the three are stale, update them as part of the same task. Do not wait to be asked.
+If any are stale, update them as part of the same task. Do not wait to be asked.
 
 ## Adding a new package
 
 Every new package requires three steps — always do all three before committing:
 1. Add complete godoc (package-level comment + all exported identifiers)
 2. Update `README.md` (Features table + Package Reference section)
-3. Update `example/` to demonstrate the new package's key API
+3. Update `example/full/` to demonstrate the new package's key API
 
 ### New package checklist
 
 Before writing any code, verify:
 - [ ] Does the package need a `core/` interface? (yes if other packages will depend on it, or if it needs to be mockable in tests)
-- [ ] Does it manage shared state? → use named registry pattern (`Register` / `Get`)
+- [ ] Does it manage shared named resources? → use named registry pattern (`Register` / `Get` / `Replace` / `CloseAll`)
 - [ ] Does it hold a long-running goroutine? → implement `core.Server` (`Start` blocks, `Stop` unblocks)
 - [ ] Does it need Redis? → get client from `cache.RedisClient("name")`, never open a new connection directly
+- [ ] Does it have init/shutdown lifecycle? → implement `app.Lifecycle`
+- [ ] Does it hold closeable resources? → implement `app.Closer`
 
 ### Mandatory file layout
 
@@ -119,19 +123,32 @@ func New(opts ...Option) (*Xxx, error) {
 ### Named registry — use when multiple named instances are needed
 
 ```go
+var ErrAlreadyRegistered = errors.Define(409, "NEWPKG_ALREADY_REGISTERED", "already registered")
 var (
     registry   = map[string]*Xxx{}
     registryMu sync.RWMutex
 )
 
-func Register(name string, opts ...Option) error {
-    x, err := New(opts...)
-    if err != nil {
-        return err
-    }
+// Register stores x under name. Returns ErrAlreadyRegistered if name is taken.
+func Register(name string, x *Xxx) error {
     registryMu.Lock()
+    defer registryMu.Unlock()
+    if _, ok := registry[name]; ok {
+        return ErrAlreadyRegistered
+    }
+    registry[name] = x
+    return nil
+}
+
+// Replace stores x under name, closing and releasing the old instance first.
+func Replace(name string, x *Xxx) error {
+    registryMu.Lock()
+    old := registry[name]
     registry[name] = x
     registryMu.Unlock()
+    if old != nil {
+        old.Close() //nolint:errcheck
+    }
     return nil
 }
 
@@ -139,6 +156,13 @@ func Get(name string) *Xxx {
     registryMu.RLock()
     defer registryMu.RUnlock()
     return registry[name]
+}
+
+// reset clears the registry. For use in tests only (_test.go).
+func reset() {
+    registryMu.Lock()
+    clear(registry)
+    registryMu.Unlock()
 }
 ```
 
@@ -181,7 +205,7 @@ ln, err := net.Listen("tcp", ":0")
 addr := ln.Addr().String()
 ```
 
-- Tests must not rely on or mutate package-level globals. If the package has global state, provide a `reset()` helper used only in tests.
+- Tests must not rely on or mutate package-level globals. If the package has global state, provide an unexported `reset()` helper in `_test.go` only.
 
 ### Import rules
 
@@ -200,29 +224,59 @@ core/            ← interfaces only (Logger, Config, Server, Provider) — zero
 errors/          ← CodedError (HTTP code + reason + cause chain), sentinel vars
 config/          ← viper implementation of core.Config
 logger/          ← zap + lumberjack; per-level log files; sensitive field masking
-app/             ← lifecycle manager: migrations → Lifecycle.Init → BeforeStart → Start → signal → Stop → Lifecycle.Shutdown → Closer.Close; WithLifecycle(components...) / WithCloser(closers...)
-server/http/     ← gin server implementing core.Server; auto-mounts default middleware stack
+app/             ← lifecycle manager: Migrator.Up → Lifecycle.Init → BeforeStart → Server.Start → signal
+                    → Server.Stop → Lifecycle.Shutdown (reverse) → Closer.Close → AfterStop
+                    Options: WithLifecycle(components...) / WithCloser(closers...)
+                    Interfaces: Lifecycle{Init,Shutdown}, Closer{Close}, Migrator{Up}
+server/http/     ← gin server implementing core.Server; auto-mounts default middleware stack:
+                    RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler
+                    Do NOT re-add these middlewares manually — causes duplicate responses
 server/grpc/     ← gRPC server implementing core.Server; auto-chains interceptors
-middleware/http/ ← RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler + optional CORS/RateLimit/etc.
-middleware/grpc/ ← same set as unary interceptors; Metrics stub wired by metric.Init()
-database/        ← gorm multi-driver (mysql/postgres/sqlite), SQL tracing plugin, goose migrations
-cache/           ← Cache interface; Manager type holds named backends; cache.New() returns (*Manager, error); cache.Register("name", mgr) / cache.Client("name"); memory (default) or Redis backend; Manager implements app.Closer
+middleware/http/ ← RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler
+                    + optional: CORS, Timeout, BodyLimit, RateLimit, IPFilter
+middleware/grpc/ ← UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler
+                    + optional: UnaryTimeout, UnaryRateLimit, UnaryIPFilter
+database/        ← gorm multi-driver (mysql/postgres/sqlite); SQL tracing plugin; goose migrations
+                    database.New() → *Manager (no global side effects)
+                    database.Register("name", mgr) / database.Get("name") / database.DB("conn")
+                    *Manager implements app.Migrator; Manager.Close() releases all connections
+cache/           ← Cache interface; Manager holds named backends (memory/Redis)
+                    cache.New() → *Manager (no global side effects)
+                    cache.Register("name", mgr) / cache.Client("name") / cache.RedisClient("name")
+                    *Manager implements app.Closer; Manager.CloseBackend("name") / Manager.CloseAll()
 httpclient/      ← outbound HTTP; otelhttp tracing; exponential-backoff retry; named registry
+                    httpclient.Register("name", opts...) / httpclient.Get("name")
 grpcclient/      ← outbound gRPC; otelgrpc; retry interceptor; named registry; grpc.NewClient
+                    grpcclient.Register("name", target, opts...) / grpcclient.Get("name")
+                    grpcclient.NewRegistry() implements app.Closer (calls CloseAll on shutdown)
 lock/            ← Redis distributed lock; Lua atomic acquire/release; optional auto-renew
 cron/            ← robfig/cron scheduler implementing core.Server; WithDistributedLock option
-event/           ← in-process pub/sub; Bus struct only (no package-level functions); event.New() returns *Bus; sync (default) or async delivery
-stream/          ← Redis Streams distributed pub/sub; Bus struct only (no package-level functions); stream.New(redisClient, opts...) returns (*Bus, error); work-queue (WithGroup) and broadcast (WithBroadcast) modes
-tracing/         ← otel OTLP provider implementing core.Provider
-metric/          ← Prometheus + OTLP dual-channel; Count/Gauge/StartTimer helpers
+event/           ← in-process pub/sub; Bus struct only — no package-level state
+                    bus := event.New() / bus.Subscribe / bus.Publish / bus.Unsubscribe
+                    event.New(event.WithAsync()) for async delivery
+stream/          ← Redis Streams pub/sub; Bus struct only — no package-level state
+                    bus, err := stream.New(redisClient, opts...) — returns error if client is nil
+                    bus.Subscribe(topic, stream.WithGroup(...), stream.WithHandler(...))
+                    bus.Subscribe(topic, stream.WithBroadcast(), stream.WithHandler(...))
+                    app.WithServer(bus.Worker()) — Worker implements core.Server
+tracing/         ← OTel OTLP provider; implements core.Provider and app.Lifecycle
+                    tracing.New() → *Provider; Init() is no-op; Shutdown() flushes spans
+metric/          ← Prometheus + OTLP; implements app.Lifecycle
+                    metric.New() → *Provider; p.Init(ctx) starts exporters + wires middleware hooks
+                    metric.Count / Gauge / StartTimer — package-level facade (idempotent sync.Once wiring)
 auth/            ← JWT signing/verification; Required/Optional gin middleware; FromContext[T]
 validate/        ← go-playground/validator; BindJSON/BindForm/BindQuery/BindURI helpers
 pagination/      ← Params, Result[T], FromQuery, Offset, New[T]
 circuitbreaker/  ← three-state circuit breaker (Closed/Open/HalfOpen); Execute(ctx, fn)
 storage/         ← Storage interface; S3 / Alibaba OSS / Tencent COS backends
+                    storage.Register("name", opts...) / storage.Get("name") / storage.Replace(...)
 notify/          ← Email(SMTP) / SMS(Aliyun) / DingTalk / WeCom / Feishu notification channels
-pprof/           ← pprof profiling endpoints; standalone server (core.Server) or Register on existing gin.Engine
-idgen/           ← Snowflake ID generator + ULID; instance-first: idgen.New() returns (*Generator, error); idgen.Register("name", gen) / idgen.Get("name").Next() for registry usage; ULID() for time-sortable string IDs; auto-derives worker ID from host IP
+pprof/           ← pprof profiling endpoints; standalone server (core.Server) or Register on gin.Engine
+idgen/           ← Snowflake ID generator + ULID
+                    gen, err := idgen.New(idgen.WithWorkerID(n)) — warns if worker_id not set explicitly
+                    idgen.Register("name", gen) / idgen.Get("name").Next() / idgen.Get("name").NextString()
+                    idgen.ULID() — time-sortable string, no registration needed
+                    Production: always set idgen.worker_id in config (IP-derived default is unstable in containers)
 testutil/        ← test helpers: FreePort, NewConfig (stub core.Config), NewLogger (writes to t.Log)
 ratelimit/       ← Limiter interface; in-process token-bucket or distributed Redis fixed-window; used by middleware
 ```
@@ -231,22 +285,28 @@ ratelimit/       ← Limiter interface; in-process token-bucket or distributed R
 
 **Functional options** — every package constructor follows the same shape:
 ```go
-func New(opts ...Option) (*T, error)   // or func Init(opts ...Option) error
+func New(opts ...Option) (*T, error)
 type Option func(*options)
-func WithXxx(...) Option { return func(o *options) { ... } }
 func WithConfig(cfg core.Config) Option  // present on all infrastructure packages
 func WithLogger(l core.Logger) Option    // present on all infrastructure packages
 ```
 
-**Named registry** — database, cache, httpclient, grpcclient follow this pattern:
+**Named registry** — all registry packages use this consistent API:
 ```go
-Register("name", opts...)   // or Init / New that stores internally
-Get("name")                 // returns typed value or nil
+Register(name string, instance *T) error   // ErrAlreadyRegistered on duplicate
+Replace(name string, instance *T) error    // closes old, stores new
+Get(name string) *T                        // nil if not found
+CloseAll() error                           // close all + clear
+reset()                                    // unexported; _test.go only
 ```
 
-**core.Server contract** — `Start` must block; `Stop` must be called to unblock it. `app.WithServer` runs each server in a goroutine. `cron.Scheduler`, `stream.Worker`, and both network servers implement this interface.
+**core.Server contract** — `Start` must block; `Stop` must be called to unblock it. `app.WithServer` runs each server in a goroutine. `cron.Scheduler`, `stream.Bus.Worker()`, and both network servers implement this interface.
 
-**Metrics stub + late wiring** — `middleware/http` and `middleware/grpc` expose `RegisterHTTPMetricHooks` / `RegisterGRPCMetricHooks`. These are no-ops until `metric.Init()` calls them, breaking the import cycle between middleware and metric.
+**app.Lifecycle contract** — `Init` is called before servers start (sequential), `Shutdown` is called after servers stop (reverse order). If `Init[i]` fails, all previously-Init'd components are Shutdown in reverse before `Run` returns. Implemented by `tracing.Provider` and `metric.Provider`.
+
+**app.Closer contract** — `Close` is called after all `Lifecycle.Shutdown` calls complete. Implemented by `cache.Manager` and `grpcclient.Registry`.
+
+**Metrics stub + late wiring** — `middleware/http` and `middleware/grpc` expose hook registration functions. These are no-ops until `metric.Provider.Init()` is called, breaking the import cycle between middleware and metric. Wire functions are idempotent via `sync.Once`.
 
 ### Error handling convention
 
@@ -260,18 +320,19 @@ return nil, errors.Wrap(ErrUserNotFound, "query user: %w", dbErr)
 // Check type
 if errors.Is(err, ErrUserNotFound) { ... }
 
-// HTTP/gRPC middleware auto-converts CodedError to JSON / gRPC status
+// HTTP handler — use c.Error(); ErrorHandler middleware converts to JSON
+c.Error(err)   // NOT c.JSON(500, gin.H{"error": err.Error()})
 ```
 
 Non-`CodedError` values returned from handlers produce a generic 500 (message not forwarded).
 
 ### Context discipline
 
-Every log call receives `ctx`. The logger extracts `trace_id` / `span_id` automatically from any active otel span. All outbound clients (httpclient, grpcclient, stream) propagate trace context through headers/metadata.
+Every log call receives `ctx`. The logger extracts `trace_id` / `span_id` automatically from any active OTel span. All outbound clients (`httpclient`, `grpcclient`, `stream`) propagate trace context through headers/metadata.
 
 ### Redis connection sharing
 
-`cache` is the Redis connection registry. Packages that need a `*redis.Client` (lock, stream) get it from `cache.RedisClient("name")`. Configure one named Redis backend in cache; all packages share it — no duplicate Redis addresses.
+`cache` is the Redis connection registry. Packages that need a `*redis.Client` (`lock`, `stream`, `ratelimit`) call `cache.RedisClient("name")`. Configure one named Redis backend in cache; all packages share it — no duplicate Redis addresses.
 
 ```yaml
 cache:
@@ -283,14 +344,30 @@ cache:
 ```
 
 ```go
-locker := lock.NewWithClient(cache.RedisClient("redis"))
-streamBus, err := stream.New(cache.RedisClient("redis"))
+cacheMgr, _ := cache.New(cache.WithConfig(cfg))
+cache.Register("default", cacheMgr)
+
+locker    := lock.NewWithClient(cache.RedisClient("redis"))
+streamBus, _ := stream.New(cache.RedisClient("redis"))
 ```
 
 ### event vs stream
 
 - `event` — in-process pub/sub; zero deps; synchronous by default; use for module decoupling within one process.
 - `stream` — cross-instance pub/sub via Redis Streams; requires Redis 5.0+; use when multiple service replicas must coordinate. Two modes: work-queue (`WithGroup`) and broadcast (`WithBroadcast`).
+
+### HTTP middleware stack warning
+
+`server/http.New()` mounts the full default stack automatically. **Never add the same middleware again**:
+
+```go
+srv, _ := httpserver.New(...)
+r := srv.Engine()
+// ❌ Wrong — ErrorHandler is already in the stack; this causes duplicate JSON responses
+r.Use(mw.RequestID(), mw.Logger(log), mw.Recovery(), mw.ErrorHandler())
+// ✅ Correct — just register routes
+r.GET("/users", handler.ListUsers)
+```
 
 ### cron distributed execution
 
@@ -308,10 +385,19 @@ Defined in `app/options.go` (not in database) to avoid an import cycle. `*databa
 
 `robfig/cron/v3` truncates `@every` durations below 1 second. `Scheduler.Add` detects sub-second specs and routes them through a `time.Ticker` goroutine instead.
 
+### idgen worker ID in production
+
+`idgen.New()` without `WithWorkerID` auto-derives the worker ID from the last byte of the host's primary IPv4 address and emits a Warn log. This is unstable in containerized environments (IP can change, collisions possible). Always configure `idgen.worker_id` explicitly in production:
+
+```yaml
+idgen:
+  worker_id: 42   # unique per deployed instance
+```
+
 ### example service
 
 `example/` contains two separate Go modules:
-- `example/quickstart/` — minimal HTTP service; demonstrates config, logger, gin routes, and app lifecycle. Replace directive points at `../../`.
-- `example/full/` — full-featured service; demonstrates every mk package. Replace directive points at `../../`.
+- `example/quickstart/` — minimal HTTP service demonstrating config, logger, gin routes, and app lifecycle. Uses `net.Listen(":0")` for a random port to avoid bind conflicts. Replace directive: `../../`.
+- `example/full/` — full-featured service demonstrating every mk package. Replace directive: `../../`.
 
 Run `go mod tidy` inside the relevant subdirectory after adding new dependencies to the parent module.
