@@ -149,9 +149,17 @@ func (a *App) Run() error {
 	case <-stopCtx.Done():
 		a.log(ctx, "app: shutdown timeout exceeded")
 	}
-	// NOTE: startWg.Wait() has no deadline; if a server's Start goroutine is hung,
-	// Run() blocks here indefinitely. This is a pre-existing behavior retained for now.
-	startWg.Wait()
+
+	// Wait for Start goroutines to exit, but respect the shutdown deadline.
+	// If a server's Start is hung (e.g., blocked on I/O), we log and move on
+	// rather than blocking forever.
+	startDone := make(chan struct{})
+	go func() { startWg.Wait(); close(startDone) }()
+	select {
+	case <-startDone:
+	case <-stopCtx.Done():
+		a.log(ctx, "app: start goroutines did not exit within shutdown timeout")
+	}
 
 	if runErr == nil {
 		for _, err := range stopErrs {

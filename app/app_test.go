@@ -165,6 +165,41 @@ func TestRun_ServerStartError_StopErrorBothCollected(t *testing.T) {
 	require.Contains(t, err.Error(), "start failed")
 }
 
+func TestRun_HungServer_ReturnsAfterTimeout(t *testing.T) {
+	// startFn blocks on a channel that is NEVER closed by stopFn.
+	// This simulates a truly hung goroutine (e.g. blocked on I/O).
+	// Without the fix, Run() would block on startWg.Wait() forever after Stop returns.
+	neverUnblocked := make(chan struct{}) // intentionally never closed
+
+	hung := &testServer{
+		startFn: func(ctx context.Context) error {
+			<-neverUnblocked // blocks forever — not released by stopFn
+			return nil
+		},
+		stopFn: func(ctx context.Context) error {
+			// Stop returns immediately; Start goroutine is still blocked
+			return nil
+		},
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+	}()
+
+	start := time.Now()
+	err := app.New(
+		app.WithServer(hung),
+		app.WithShutdownTimeout(200*time.Millisecond),
+	).Run()
+	elapsed := time.Since(start)
+
+	assert.NoError(t, err)
+	// With the fix: Run returns within ~shutdownTimeout (200ms) + small overhead.
+	// Without the fix: Run blocks here forever because startWg.Wait() has no deadline.
+	assert.Less(t, elapsed, 2*time.Second, "Run should not hang after shutdown timeout")
+}
+
 func TestRun_CloserCalledAfterLifecycleShutdown(t *testing.T) {
 	order := []string{}
 	lc := &testLifecycle{
