@@ -1,4 +1,4 @@
-.PHONY: test test-race build lint vet fmt clean tidy help
+.PHONY: test test-race build lint vet fmt clean tidy help example-build example-run example-run-full
 
 # Default target
 all: vet lint test
@@ -46,13 +46,18 @@ clean:
 	go clean ./...
 	rm -f coverage.out coverage.html
 
-## example-build: build the example service
+## example-build: build both example services (quickstart and full)
 example-build:
-	cd example && go build ./...
+	cd example/quickstart && go build ./...
+	cd example/full && go build ./...
 
-## example-run: run the example service
+## example-run: run the quickstart example service
 example-run:
-	cd example && go run .
+	cd example/quickstart && go run .
+
+## example-run-full: run the full example service
+example-run-full:
+	cd example/full && go run .
 
 ## help: show this help
 help:
