@@ -72,4 +72,3 @@ func TestProvider_Shutdown(t *testing.T) {
 	p.Init(context.Background()) //nolint:errcheck
 	require.NoError(t, p.Shutdown(context.Background()))
 }
-

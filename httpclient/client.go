@@ -258,6 +258,6 @@ func Init(cfg core.Config, names ...string) {
 	}
 	for _, name := range names {
 		c := New(withConfigEntry(cfg, name))
-		Replace(name, c)
+		Replace(name, c) //nolint:errcheck
 	}
 }
