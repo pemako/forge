@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/pemako/mk/core"
+	"github.com/pemako/mk/errors"
 )
 
 // Storage is the interface implemented by all object storage backends.
@@ -218,11 +219,34 @@ var (
 	registryMu sync.RWMutex
 )
 
+// ErrAlreadyRegistered is returned by Register when a storage instance with
+// the given name already exists in the global registry.
+var ErrAlreadyRegistered = errors.Define(409, "STORAGE_ALREADY_REGISTERED", "storage already registered")
+
 // Register creates a Storage from opts and stores it under name in the global
 // registry. A subsequent call to Get(name) returns the same instance.
 // Register is safe for concurrent use and is typically called once at startup
 // per logical storage destination (e.g., "avatars", "documents").
+// Returns ErrAlreadyRegistered if a storage with that name already exists.
 func Register(name string, opts ...Option) error {
+	s, err := New(opts...)
+	if err != nil {
+		return err
+	}
+	registryMu.Lock()
+	if _, ok := registry[name]; ok {
+		registryMu.Unlock()
+		return ErrAlreadyRegistered
+	}
+	registry[name] = s
+	registryMu.Unlock()
+	return nil
+}
+
+// Replace creates a Storage from opts and stores it under name, overwriting
+// any existing entry without error. Storage backends have no connections to
+// close, so the old instance is simply replaced.
+func Replace(name string, opts ...Option) error {
 	s, err := New(opts...)
 	if err != nil {
 		return err
