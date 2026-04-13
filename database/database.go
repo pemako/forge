@@ -14,31 +14,36 @@ import (
 	"github.com/pemako/mk/errors"
 )
 
-// Manager holds the configuration for all registered database connections and
-// satisfies the app.Migrator interface. Obtain one with New.
+// Manager holds all database connections created by New and satisfies the
+// app.Migrator interface. Obtain one with New, then register it globally with
+// Register if package-level access via Get / DB is needed.
 type Manager struct {
-	opts options
+	opts        options
+	connections map[string]*gorm.DB
 }
 
 var (
-	registry   = map[string]*gorm.DB{}
+	registry   = map[string]*Manager{}
 	registryMu sync.RWMutex
 )
 
-// ErrAlreadyRegistered is returned by New when a connection with the given
+// ErrAlreadyRegistered is returned by Register when a Manager with the given
 // name already exists in the global registry.
 var ErrAlreadyRegistered = errors.Define(409, "DATABASE_ALREADY_REGISTERED", "database connection already registered")
 
 // New opens all configured database connections, validates each with a Ping,
-// applies connection pool settings, optionally installs the tracing plugin,
-// and registers each connection in the global registry. It returns an error if
-// any connection cannot be opened or does not respond to Ping.
+// applies connection pool settings, and optionally installs the tracing plugin.
+// Connections are stored on the returned Manager; nothing is written to the
+// global registry. Use Register to make the Manager accessible by name.
 func New(opts ...Option) (*Manager, error) {
 	o := options{}
 	for _, opt := range opts {
 		opt(&o)
 	}
-
+	m := &Manager{
+		opts:        o,
+		connections: make(map[string]*gorm.DB, len(o.drivers)),
+	}
 	for _, d := range o.drivers {
 		db, err := openDB(d.cfg)
 		if err != nil {
@@ -68,44 +73,83 @@ func New(opts ...Option) (*Manager, error) {
 			db.Use(newTracingPlugin(d.name, o.logger, d.cfg.SlowThreshold))
 		}
 
-		registryMu.Lock()
-		if _, ok := registry[d.name]; ok {
-			registryMu.Unlock()
-			sqlDB, _ := db.DB()
-			sqlDB.Close() //nolint:errcheck
-			return nil, ErrAlreadyRegistered
-		}
-		registry[d.name] = db
-		registryMu.Unlock()
+		m.connections[d.name] = db
 	}
-
-	return &Manager{opts: o}, nil
+	return m, nil
 }
 
-// Register is a convenience function that creates a single named database
-// connection and registers it in the global registry.
-// It is equivalent to New(WithDriver(name, driver, dsn), opts...).
-//
-// Example:
-//
-//	database.Register("default", "sqlite", "file::memory:", database.WithLogger(log))
-//	db := database.DB("default")
-func Register(name, driver, dsn string, opts ...Option) error {
-	_, err := New(append([]Option{WithDriver(name, driver, dsn)}, opts...)...)
-	return err
+// DB returns the *gorm.DB for the named connection held by this Manager,
+// or nil if no connection with that name was opened.
+func (m *Manager) DB(name string) *gorm.DB {
+	return m.connections[name]
 }
 
-// DB returns the *gorm.DB for the named connection from the global registry,
-// or nil if the name has not been registered. Connections are registered
-// by New and are available to any package without further configuration.
-func DB(name string) *gorm.DB {
+// Close closes all database connections held by this Manager and removes them
+// from the internal map. The first close error encountered is returned; other
+// connections are still closed.
+func (m *Manager) Close() error {
+	var first error
+	for name, db := range m.connections {
+		sqlDB, err := db.DB()
+		if err != nil {
+			continue
+		}
+		if err := sqlDB.Close(); err != nil && first == nil {
+			first = err
+		}
+		delete(m.connections, name)
+	}
+	return first
+}
+
+// Register stores m in the global registry under name. Returns
+// ErrAlreadyRegistered if a Manager is already registered under that name.
+func Register(name string, m *Manager) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, ok := registry[name]; ok {
+		return ErrAlreadyRegistered
+	}
+	registry[name] = m
+	return nil
+}
+
+// Replace stores m in the global registry under name, replacing any previous
+// Manager. If a previous Manager existed it is closed before the function
+// returns. Replace never returns an error.
+func Replace(name string, m *Manager) error {
+	registryMu.Lock()
+	old := registry[name]
+	registry[name] = m
+	registryMu.Unlock()
+	if old != nil {
+		old.Close() //nolint:errcheck
+	}
+	return nil
+}
+
+// Get returns the Manager registered under name, or nil.
+func Get(name string) *Manager {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	return registry[name]
 }
 
-// Up applies all pending migrations for every registered database connection.
-// It is a no-op when WithMigrationsDir was not configured.
+// DB is a convenience function that delegates to Get("default").DB(connName).
+// It returns nil when no Manager is registered as "default" or when the named
+// connection does not exist on that Manager.
+func DB(connName string) *gorm.DB {
+	registryMu.RLock()
+	m := registry["default"]
+	registryMu.RUnlock()
+	if m == nil {
+		return nil
+	}
+	return m.DB(connName)
+}
+
+// Up applies all pending migrations for every database connection held by this
+// Manager. It is a no-op when WithMigrationsDir was not configured.
 // Up satisfies the app.Migrator interface and is called by app.Run before
 // BeforeStart hooks and server startup.
 func (m *Manager) Up(ctx context.Context) error {
@@ -113,7 +157,7 @@ func (m *Manager) Up(ctx context.Context) error {
 		return nil
 	}
 	for _, d := range m.opts.drivers {
-		db := DB(d.name)
+		db := m.DB(d.name)
 		if db == nil {
 			continue
 		}

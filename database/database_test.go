@@ -45,8 +45,8 @@ func TestWithConfig_fromFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, mgr)
 
-	// The "default" connection should be registered
-	db := database.DB("default")
+	// Access the "default" connection directly from the Manager
+	db := mgr.DB("default")
 	require.NotNil(t, db)
 
 	// Execute queries to trigger the tracing plugin before/after callbacks
@@ -68,17 +68,17 @@ func TestNew_pingFails(t *testing.T) {
 	_ = err
 }
 
-func TestDB_afterNew(t *testing.T) {
-	_, err := database.New(database.WithDriver("test_get", "sqlite", "file::memory:?cache=shared&_get"))
+func TestManager_DB_afterNew(t *testing.T) {
+	mgr, err := database.New(database.WithDriver("test_get", "sqlite", "file::memory:?cache=shared&_get"))
 	require.NoError(t, err)
-	db := database.DB("test_get")
+	db := mgr.DB("test_get")
 	require.NotNil(t, db)
 }
 
 func TestMigrator_upTo(t *testing.T) {
-	_, err := database.New(database.WithDriver("migrate_upto", "sqlite", "file::memory:?cache=shared&_upto"))
+	mgr, err := database.New(database.WithDriver("migrate_upto", "sqlite", "file::memory:?cache=shared&_upto"))
 	require.NoError(t, err)
-	db := database.DB("migrate_upto")
+	db := mgr.DB("migrate_upto")
 	m := database.NewMigrator(db, "testdata/migrations")
 	err = m.UpTo(context.Background(), 1)
 	require.NoError(t, err)
@@ -88,9 +88,9 @@ func TestMigrator_upTo(t *testing.T) {
 }
 
 func TestMigrator_down_noMigrations(t *testing.T) {
-	_, err := database.New(database.WithDriver("migrate_down_empty", "sqlite", "file::memory:?cache=shared&_downempty"))
+	mgr, err := database.New(database.WithDriver("migrate_down_empty", "sqlite", "file::memory:?cache=shared&_downempty"))
 	require.NoError(t, err)
-	db := database.DB("migrate_down_empty")
+	db := mgr.DB("migrate_down_empty")
 	m := database.NewMigrator(db, "testdata/migrations")
 	// Up first, then down
 	require.NoError(t, m.Up(context.Background()))
@@ -106,19 +106,6 @@ func TestWithMigrationsDir(t *testing.T) {
 	// Up() should run migrations when migrationsDir is set
 	err = mgr.Up(context.Background())
 	require.NoError(t, err)
-}
-
-func TestRegister_convenience(t *testing.T) {
-	err := database.Register("reg_conv", "sqlite", "file::memory:?cache=shared&_regconv")
-	require.NoError(t, err)
-	db := database.DB("reg_conv")
-	require.NotNil(t, db)
-}
-
-func TestRegister_unsupportedDriver(t *testing.T) {
-	err := database.Register("reg_bad", "baddriver", "dsn")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported driver")
 }
 
 func TestWithLogger_option(t *testing.T) {
@@ -146,7 +133,7 @@ func TestNew_sqlite(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, mgr)
 
-	db := database.DB("test_sqlite1")
+	db := mgr.DB("test_sqlite1")
 	require.NotNil(t, db)
 
 	require.NoError(t, db.AutoMigrate(&User{}))
@@ -162,12 +149,12 @@ func TestDB_unknownName(t *testing.T) {
 }
 
 func TestMigrator_upDown(t *testing.T) {
-	_, err := database.New(
+	mgr, err := database.New(
 		database.WithDriver("migrate_test", "sqlite", "file::memory:?cache=shared&_migrate"),
 	)
 	require.NoError(t, err)
 
-	db := database.DB("migrate_test")
+	db := mgr.DB("migrate_test")
 	m := database.NewMigrator(db, "testdata/migrations")
 
 	require.NoError(t, m.Up(context.Background()))
