@@ -43,14 +43,19 @@ func (a *App) log(ctx context.Context, msg string, fields ...core.Field) {
 // SIGTERM or SIGINT, or until a server returns a fatal error.
 // The lifecycle phases executed in order are:
 //  1. Migrations (WithMigration) — Up is called once.
-//  2. BeforeStart hooks — called sequentially; first error aborts startup.
-//  3. All registered Servers are started concurrently.
-//  4. Run blocks until SIGTERM/SIGINT or a server error.
-//  5. All Servers are stopped concurrently within ShutdownTimeout.
-//  6. AfterStop hooks — called sequentially after all servers have stopped.
+//  2. Lifecycle.Init() — sequential; on failure, already-init'd components are
+//     Shutdown in reverse order before Run returns.
+//  3. BeforeStart hooks — called sequentially; first error aborts startup.
+//  4. All registered Servers are started concurrently.
+//  5. Run blocks until SIGTERM/SIGINT or a server error.
+//  6. All Servers are stopped concurrently within ShutdownTimeout; each stop
+//     error is logged and the first becomes the return error if none prior.
+//  7. Lifecycle.Shutdown() — reverse registration order.
+//  8. Closer.Close() — registration order; errors collected but do not stop subsequent Closers.
+//  9. AfterStop hooks — called sequentially after all of the above.
 //
 // Run returns a non-nil error if any phase fails; the first error encountered
-// is returned. AfterStop errors are only returned if no earlier error occurred.
+// is returned.
 func (a *App) Run() error {
 	ctx := context.Background()
 
@@ -59,6 +64,20 @@ func (a *App) Run() error {
 			return fmt.Errorf("migration: %w", err)
 		}
 		a.log(ctx, "app: migrations complete")
+	}
+
+	for i, lc := range a.opts.lifecycles {
+		if err := lc.Init(ctx); err != nil {
+			for j := i - 1; j >= 0; j-- {
+				if shutErr := a.opts.lifecycles[j].Shutdown(ctx); shutErr != nil {
+					a.log(ctx, "app: lifecycle rollback shutdown error",
+						core.Field{Key: "index", Value: j},
+						core.Field{Key: "err", Value: shutErr.Error()},
+					)
+				}
+			}
+			return fmt.Errorf("lifecycle init[%d]: %w", i, err)
+		}
 	}
 
 	for _, fn := range a.opts.beforeStart {
@@ -91,32 +110,65 @@ func (a *App) Run() error {
 	case err := <-errCh:
 		runErr = fmt.Errorf("server error: %w", err)
 	case <-quit:
-		a.log(ctx, "app: shutdown signal received, stopping...")
+		a.log(ctx, "app: shutdown signal received")
 	}
 
 	stopCtx, cancel := context.WithTimeout(ctx, a.opts.shutdownTimeout)
 	defer cancel()
 
-	var wg sync.WaitGroup
-	for _, srv := range a.opts.servers {
-		wg.Add(1)
-		srv := srv
+	stopErrs := make([]error, len(a.opts.servers))
+	var stopWg sync.WaitGroup
+	for i, srv := range a.opts.servers {
+		stopWg.Add(1)
+		i, srv := i, srv
 		go func() {
-			defer wg.Done()
-			srv.Stop(stopCtx)
+			defer stopWg.Done()
+			if err := srv.Stop(stopCtx); err != nil {
+				stopErrs[i] = err
+				a.log(ctx, "app: server stop error", core.Field{Key: "err", Value: err.Error()})
+			}
 		}()
 	}
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
+	stopDone := make(chan struct{})
+	go func() { stopWg.Wait(); close(stopDone) }()
 	select {
-	case <-done:
+	case <-stopDone:
 	case <-stopCtx.Done():
+		a.log(ctx, "app: shutdown timeout exceeded")
+	}
+	// NOTE: startWg.Wait() has no deadline; if a server's Start goroutine is hung,
+	// Run() blocks here indefinitely. This is a pre-existing behavior retained for now.
+	startWg.Wait()
+
+	if runErr == nil {
+		for _, err := range stopErrs {
+			if err != nil {
+				runErr = fmt.Errorf("server stop: %w", err)
+				break
+			}
+		}
 	}
 
-	a.log(ctx, "app: servers stopped")
+	for i := len(a.opts.lifecycles) - 1; i >= 0; i-- {
+		if err := a.opts.lifecycles[i].Shutdown(stopCtx); err != nil {
+			a.log(ctx, "app: lifecycle shutdown error",
+				core.Field{Key: "index", Value: i},
+				core.Field{Key: "err", Value: err.Error()},
+			)
+			if runErr == nil {
+				runErr = fmt.Errorf("lifecycle shutdown[%d]: %w", i, err)
+			}
+		}
+	}
 
-	// Wait for all Start goroutines to finish so callers see consistent state.
-	startWg.Wait()
+	for _, c := range a.opts.closers {
+		if err := c.Close(); err != nil {
+			a.log(ctx, "app: closer error", core.Field{Key: "err", Value: err.Error()})
+			if runErr == nil {
+				runErr = fmt.Errorf("closer: %w", err)
+			}
+		}
+	}
 
 	for _, fn := range a.opts.afterStop {
 		if err := fn(stopCtx); err != nil && runErr == nil {
@@ -125,6 +177,5 @@ func (a *App) Run() error {
 	}
 
 	a.log(ctx, "app: shutdown complete")
-
 	return runErr
 }

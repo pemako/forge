@@ -31,6 +31,23 @@ type Migrator interface {
 	Up(ctx context.Context) error
 }
 
+// Lifecycle manages the lifecycle of a non-blocking resource.
+// Init is called after migrations and before BeforeStart hooks.
+// If Init fails, all previously Init'd Lifecycle components are Shutdown in
+// reverse order before Run returns the error.
+// Shutdown is called after all servers have stopped, in reverse registration order.
+type Lifecycle interface {
+	Init(ctx context.Context) error
+	Shutdown(ctx context.Context) error
+}
+
+// Closer releases resources after all servers have stopped and all Lifecycle
+// Shutdown calls have completed. Close is called in registration order.
+// Errors are collected but do not stop subsequent Closers.
+type Closer interface {
+	Close() error
+}
+
 // options holds the functional configuration for New.
 type options struct {
 	name            string
@@ -38,6 +55,8 @@ type options struct {
 	servers         []core.Server
 	logger          core.Logger
 	migrator        Migrator
+	lifecycles      []Lifecycle
+	closers         []Closer
 	shutdownTimeout time.Duration
 	beforeStart     []func(context.Context) error
 	afterStop       []func(context.Context) error
@@ -85,4 +104,18 @@ func WithBeforeStart(fn func(context.Context) error) Option {
 // Multiple hooks are executed in registration order.
 func WithAfterStop(fn func(context.Context) error) Option {
 	return func(o *options) { o.afterStop = append(o.afterStop, fn) }
+}
+
+// WithLifecycle registers one or more Lifecycle components. Init is called
+// after migrations and before BeforeStart hooks, in registration order.
+// Shutdown is called after all servers have stopped, in reverse registration order.
+func WithLifecycle(components ...Lifecycle) Option {
+	return func(o *options) { o.lifecycles = append(o.lifecycles, components...) }
+}
+
+// WithCloser registers one or more Closer instances to be called after all
+// Lifecycle Shutdown calls have completed, in registration order.
+// Errors are collected but do not stop subsequent Closers.
+func WithCloser(closers ...Closer) Option {
+	return func(o *options) { o.closers = append(o.closers, closers...) }
 }

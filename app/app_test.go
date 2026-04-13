@@ -2,12 +2,14 @@ package app_test
 
 import (
 	"context"
+	"fmt"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/pemako/mk/app"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockServer struct{ started, stopped bool }
@@ -18,6 +20,20 @@ func (m *mockServer) Stop(_ context.Context) error  { m.stopped = true; return n
 type mockMigrator struct{ called bool }
 
 func (m *mockMigrator) Up(_ context.Context) error { m.called = true; return nil }
+
+type testLifecycle struct {
+	initFn     func(ctx context.Context) error
+	shutdownFn func(ctx context.Context) error
+}
+
+func (t *testLifecycle) Init(ctx context.Context) error     { return t.initFn(ctx) }
+func (t *testLifecycle) Shutdown(ctx context.Context) error { return t.shutdownFn(ctx) }
+
+type testCloser struct {
+	closeFn func() error
+}
+
+func (t *testCloser) Close() error { return t.closeFn() }
 
 func sendSIGTERM() {
 	time.Sleep(50 * time.Millisecond)
@@ -54,4 +70,27 @@ func TestApp_migrationRunsBeforeBeforeStart(t *testing.T) {
 	).Run()
 	assert.True(t, m.called)
 	assert.Equal(t, []string{"beforeStart", "afterStop"}, order)
+}
+
+func TestWithLifecycle_InitFailureRollsBack(t *testing.T) {
+	shutdownCalled := false
+	lc1 := &testLifecycle{
+		initFn:     func(ctx context.Context) error { return nil },
+		shutdownFn: func(ctx context.Context) error { shutdownCalled = true; return nil },
+	}
+	lc2 := &testLifecycle{
+		initFn:     func(ctx context.Context) error { return fmt.Errorf("init failed") },
+		shutdownFn: func(ctx context.Context) error { return nil },
+	}
+	err := app.New(app.WithLifecycle(lc1, lc2)).Run()
+	require.Error(t, err)
+	require.True(t, shutdownCalled, "lc1.Shutdown should be called to roll back")
+}
+
+func TestWithCloser_CalledOnShutdown(t *testing.T) {
+	closed := false
+	c := &testCloser{closeFn: func() error { closed = true; return nil }}
+	go sendSIGTERM()
+	app.New(app.WithCloser(c), app.WithShutdownTimeout(time.Second)).Run()
+	require.True(t, closed)
 }
