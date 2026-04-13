@@ -72,22 +72,16 @@ func TestNextString(t *testing.T) {
 }
 
 func TestInit_and_Get(t *testing.T) {
-	require.NoError(t, idgen.Init("order", idgen.WithWorkerID(5)))
-	g := idgen.Get("order")
-	require.NotNil(t, g)
-	assert.Greater(t, g.Next(), int64(0))
+	g, err := idgen.New(idgen.WithWorkerID(5))
+	require.NoError(t, err)
+	require.NoError(t, idgen.Register("order_test", g))
+	got := idgen.Get("order_test")
+	require.NotNil(t, got)
+	assert.Greater(t, got.Next(), int64(0))
 }
 
 func TestGet_notRegistered(t *testing.T) {
 	assert.Nil(t, idgen.Get("no-such-generator"))
-}
-
-func TestPackageLevel_Next(t *testing.T) {
-	assert.Greater(t, idgen.Next(), int64(0))
-}
-
-func TestPackageLevel_NextString(t *testing.T) {
-	assert.NotEmpty(t, idgen.NextString())
 }
 
 func TestWithConfig(t *testing.T) {

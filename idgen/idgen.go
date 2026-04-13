@@ -1,6 +1,7 @@
 package idgen
 
 import (
+	"context"
 	"net"
 	"sync"
 
@@ -14,6 +15,7 @@ import (
 type options struct {
 	workerID int64
 	log      core.Logger
+	derived  bool // true when workerID was derived from IP (not explicitly set)
 }
 
 // Option configures a Generator.
@@ -23,7 +25,10 @@ type Option func(*options)
 // Worker IDs should be unique per process to avoid ID collisions across instances.
 // Defaults to the last byte of the primary non-loopback IP address (0–255).
 func WithWorkerID(id int64) Option {
-	return func(o *options) { o.workerID = id }
+	return func(o *options) {
+		o.workerID = id
+		o.derived = false
+	}
 }
 
 // WithLogger sets the logger used for lifecycle messages.
@@ -41,6 +46,7 @@ func WithConfig(cfg core.Config) Option {
 	return func(o *options) {
 		if v := cfg.GetInt("idgen.worker_id"); v != 0 {
 			o.workerID = int64(v)
+			o.derived = false
 		}
 	}
 }
@@ -49,6 +55,7 @@ func defaultOptions() options {
 	return options{
 		workerID: deriveWorkerID(),
 		log:      logger.Default(),
+		derived:  true,
 	}
 }
 
@@ -92,10 +99,14 @@ type Generator struct {
 
 // New creates a Generator with the given options.
 // Returns an error if the worker ID is out of the valid range [0, 1023].
+// Logs a Warn if the worker ID was derived from the host IP (not explicitly set).
 func New(opts ...Option) (*Generator, error) {
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.derived {
+		o.log.Warn(context.Background(), "idgen: worker_id derived from host IP — set WithWorkerID or idgen.worker_id to avoid collisions in multi-instance deployments")
 	}
 	node, err := snowflake.NewNode(o.workerID)
 	if err != nil {
@@ -114,73 +125,39 @@ func (g *Generator) NextString() string {
 	return g.node.Generate().String()
 }
 
-// --- Package-level default and named registry ---
+// --- Named registry ---
 
 var (
-	_default  *Generator
-	_initOnce sync.Once
-	registry  = map[string]*Generator{}
-	mu        sync.RWMutex
+	registry = map[string]*Generator{}
+	mu       sync.RWMutex
 )
 
-// ErrAlreadyRegistered is returned by Init when a generator with the given
+// ErrAlreadyRegistered is returned by Register when a generator with the given
 // name already exists in the global registry.
 var ErrAlreadyRegistered = errors.Define(409, "IDGEN_ALREADY_REGISTERED", "generator already registered")
 
-func getDefault() *Generator {
-	_initOnce.Do(func() {
-		g, err := New()
-		if err != nil {
-			// Should not happen with derived worker ID; fall back to 0.
-			g, _ = New(WithWorkerID(0))
-		}
-		_default = g
-	})
-	return _default
-}
-
-// Next generates a snowflake ID using the default package-level Generator.
-// The default generator derives its worker ID from the host's primary IP
-// address. Call Init to set an explicit worker ID before the first call to Next.
-func Next() int64 { return getDefault().Next() }
-
-// NextString generates a snowflake ID as a decimal string using the default generator.
-func NextString() string { return getDefault().NextString() }
-
-// Init creates a named Generator and stores it in the global registry.
-// Call Init once at startup for each logical ID namespace that requires a
-// distinct worker ID. Use Get to retrieve the generator later.
+// Register stores g in the global registry under name.
 // Returns ErrAlreadyRegistered if a generator with that name already exists.
-func Init(name string, opts ...Option) error {
-	g, err := New(opts...)
-	if err != nil {
-		return err
-	}
+func Register(name string, g *Generator) error {
 	mu.Lock()
+	defer mu.Unlock()
 	if _, ok := registry[name]; ok {
-		mu.Unlock()
 		return ErrAlreadyRegistered
 	}
 	registry[name] = g
-	mu.Unlock()
 	return nil
 }
 
-// Replace creates a named Generator and stores it in the global registry,
-// overwriting any existing entry without error. Generator has no resources
-// to close, so the old instance is simply replaced.
-func Replace(name string, opts ...Option) error {
-	g, err := New(opts...)
-	if err != nil {
-		return err
-	}
+// Replace stores g in the global registry under name, overwriting any existing
+// entry. Generator has no resources to close, so the old instance is discarded.
+func Replace(name string, g *Generator) error {
 	mu.Lock()
 	registry[name] = g
 	mu.Unlock()
 	return nil
 }
 
-// Get returns the named Generator previously registered by Init.
+// Get returns the named Generator previously registered by Register or Replace.
 // Returns nil if no generator with that name has been registered.
 func Get(name string) *Generator {
 	mu.RLock()
