@@ -192,36 +192,34 @@ var (
 	registryMu sync.RWMutex
 )
 
-// Register creates a Client with the given options and stores it in the global
-// registry under name. It returns ErrAlreadyRegistered if a client with that
-// name is already present. Use Replace to overwrite an existing entry. Retrieve
-// registered clients with Get.
-func Register(name string, opts ...Option) error {
+// Register stores c in the global registry under name.
+// Returns ErrAlreadyRegistered if name is already in use. Use Replace to overwrite.
+func Register(name string, c *Client) error {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if _, ok := registry[name]; ok {
 		return ErrAlreadyRegistered
 	}
-	registry[name] = New(opts...)
+	registry[name] = c
 	return nil
 }
 
-// Replace creates a new Client and stores it under name, overwriting any
-// existing registration. http.Client holds no persistent connections that need
-// explicit cleanup.
-func Replace(name string, opts ...Option) error {
+// Replace stores c under name, overwriting any existing entry.
+// http.Client holds no persistent connections that need explicit cleanup.
+func Replace(name string, c *Client) error {
 	registryMu.Lock()
-	registry[name] = New(opts...)
+	registry[name] = c
 	registryMu.Unlock()
 	return nil
 }
 
-// CloseAll removes all registered clients. It does not perform any I/O
-// because http.Client manages its own connection lifecycle.
-func CloseAll() {
+// CloseAll removes all registered clients and returns nil.
+// http.Client manages its own connection lifecycle; no explicit I/O release is needed.
+func CloseAll() error {
 	registryMu.Lock()
 	clear(registry)
 	registryMu.Unlock()
+	return nil
 }
 
 // Get returns the named Client previously stored by Register, or nil if no
@@ -249,6 +247,7 @@ func Init(cfg core.Config, names ...string) {
 		names = []string{"default"}
 	}
 	for _, name := range names {
-		Replace(name, withConfigEntry(cfg, name))
+		c := New(withConfigEntry(cfg, name))
+		Replace(name, c)
 	}
 }

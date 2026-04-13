@@ -109,7 +109,7 @@ func TestRegistry_RegisterGet(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	httpclient.Register("reg_test", httpclient.WithBaseURL(srv.URL))
+	httpclient.Register("reg_test", httpclient.New(httpclient.WithBaseURL(srv.URL)))
 	c := httpclient.Get("reg_test")
 	require.NotNil(t, c)
 	var out map[string]string

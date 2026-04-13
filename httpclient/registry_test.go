@@ -15,27 +15,34 @@ func reset() {
 	registryMu.Unlock()
 }
 
+func TestRegister_AcceptsInstance(t *testing.T) {
+	reset()
+	c := New(WithBaseURL("http://a.test"))
+	require.NoError(t, Register("a", c))
+	require.Equal(t, c, Get("a"))
+}
+
 func TestRegister_DuplicateError(t *testing.T) {
 	reset()
-	Register("dup", WithBaseURL("http://a.test"))
-	err := Register("dup", WithBaseURL("http://b.test"))
+	c := New(WithBaseURL("http://a.test"))
+	Register("dup", c)
+	err := Register("dup", New(WithBaseURL("http://b.test")))
 	require.ErrorIs(t, err, ErrAlreadyRegistered)
-	// Original client still there
-	require.Equal(t, "http://a.test", Get("dup").opts.baseURL)
+	require.Equal(t, c, Get("dup")) // original preserved
 }
 
-func TestReplace_Succeeds(t *testing.T) {
+func TestReplace_AcceptsInstance(t *testing.T) {
 	reset()
-	Register("r", WithBaseURL("http://old.test"))
-	require.NoError(t, Replace("r", WithBaseURL("http://new.test")))
-	require.Equal(t, "http://new.test", Get("r").opts.baseURL)
+	old := New(WithBaseURL("http://old.test"))
+	Register("r", old)
+	newC := New(WithBaseURL("http://new.test"))
+	require.NoError(t, Replace("r", newC))
+	require.Equal(t, newC, Get("r"))
 }
 
-func TestCloseAll_ClearsRegistry(t *testing.T) {
+func TestCloseAll_ReturnsNil(t *testing.T) {
 	reset()
-	Register("a", WithBaseURL("http://a.test"))
-	Register("b", WithBaseURL("http://b.test"))
-	CloseAll()
+	Register("a", New(WithBaseURL("http://a.test")))
+	require.NoError(t, CloseAll())
 	require.Nil(t, Get("a"))
-	require.Nil(t, Get("b"))
 }
