@@ -157,6 +157,15 @@ func Replace(name string, g *Generator) error {
 	return nil
 }
 
+// CloseAll removes all registered Generators and returns nil.
+// Generator holds no I/O resources; this only clears the registry.
+func CloseAll() error {
+	mu.Lock()
+	clear(registry)
+	mu.Unlock()
+	return nil
+}
+
 // Get returns the named Generator previously registered by Register or Replace.
 // Returns nil if no generator with that name has been registered.
 func Get(name string) *Generator {

@@ -32,3 +32,11 @@ func TestReplace_Succeeds(t *testing.T) {
 	require.NoError(t, Replace("gen", g2))
 	require.NotNil(t, Get("gen"))
 }
+
+func TestCloseAll_ClearsRegistry(t *testing.T) {
+	reset()
+	g, _ := New(WithWorkerID(1))
+	require.NoError(t, Register("default", g))
+	require.NoError(t, CloseAll())
+	require.Nil(t, Get("default"))
+}
