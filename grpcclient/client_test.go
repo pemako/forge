@@ -44,7 +44,9 @@ func TestDial_insecure(t *testing.T) {
 
 func TestRegistry_RegisterGet(t *testing.T) {
 	addr := startTestServer(t)
-	err := grpcclient.Register("grpc_health_test", addr, grpcclient.WithInsecure())
+	dialConn, err := grpcclient.Dial(addr, grpcclient.WithInsecure())
+	require.NoError(t, err)
+	err = grpcclient.Register("grpc_health_test", dialConn)
 	require.NoError(t, err)
 	t.Cleanup(func() { grpcclient.CloseAll() }) //nolint:errcheck
 

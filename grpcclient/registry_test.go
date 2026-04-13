@@ -38,17 +38,27 @@ func startEchoServer(t *testing.T) string {
 func TestRegister_DuplicateError(t *testing.T) {
 	reset()
 	srv := startEchoServer(t)
-	require.NoError(t, Register("dup", srv, WithInsecure()))
-	err := Register("dup", srv, WithInsecure())
+	conn1, err := Dial(srv, WithInsecure())
+	require.NoError(t, err)
+	require.NoError(t, Register("dup", conn1))
+
+	conn2, err := Dial(srv, WithInsecure())
+	require.NoError(t, err)
+	err = Register("dup", conn2)
 	require.ErrorIs(t, err, ErrAlreadyRegistered)
 }
 
 func TestReplace_ClosesOldConn(t *testing.T) {
 	reset()
 	srv := startEchoServer(t)
-	require.NoError(t, Register("r", srv, WithInsecure()))
+	conn1, err := Dial(srv, WithInsecure())
+	require.NoError(t, err)
+	require.NoError(t, Register("r", conn1))
 	old := Get("r")
-	require.NoError(t, Replace("r", srv, WithInsecure()))
+
+	conn2, err := Dial(srv, WithInsecure())
+	require.NoError(t, err)
+	require.NoError(t, Replace("r", conn2))
 	// Use pointer inequality to avoid data race from deep-comparing gRPC internals.
 	require.True(t, old != Get("r"), "Replace should store a new connection pointer")
 }

@@ -74,32 +74,26 @@ var (
 	registryMu sync.RWMutex
 )
 
-// Register dials target and stores the resulting connection in the global
-// registry under name, making it retrievable with Get. Returns any dial error.
-// Returns ErrAlreadyRegistered if a connection with that name already exists;
-// use Replace to overwrite an existing entry.
-func Register(name, target string, opts ...Option) error {
-	conn, err := Dial(target, opts...)
-	if err != nil {
-		return err
-	}
+// Register stores conn in the global registry under name.
+// Returns ErrAlreadyRegistered if name is already in use. Use Replace to overwrite.
+// Dial target and pass the resulting conn:
+//
+//	conn, err := grpcclient.Dial("users:9090", grpcclient.WithRetry(3))
+//	grpcclient.Register("users", conn)
+func Register(name string, conn *grpc.ClientConn) error {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if _, ok := registry[name]; ok {
-		conn.Close() //nolint:errcheck
+		conn.Close() //nolint:errcheck — close the unused connection
 		return ErrAlreadyRegistered
 	}
 	registry[name] = conn
 	return nil
 }
 
-// Replace dials target and stores the resulting connection under name,
-// closing any previously registered connection with the same name.
-func Replace(name, target string, opts ...Option) error {
-	conn, err := Dial(target, opts...)
-	if err != nil {
-		return err
-	}
+// Replace stores conn under name. If a connection previously existed under
+// that name, it is closed before the new one is stored.
+func Replace(name string, conn *grpc.ClientConn) error {
 	registryMu.Lock()
 	old := registry[name]
 	registry[name] = conn
@@ -182,7 +176,13 @@ func Init(cfg interface {
 		if v := cfg.GetInt("grpcclient." + name + ".retry"); v > 0 {
 			opts = append(opts, WithRetry(v))
 		}
-		if err := Register(name, addr, opts...); err != nil {
+		if err := func() error {
+			conn, err := Dial(addr, opts...)
+			if err != nil {
+				return err
+			}
+			return Register(name, conn)
+		}(); err != nil {
 			return err
 		}
 	}
