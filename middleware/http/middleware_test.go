@@ -1,6 +1,7 @@
 package httpMiddleware_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/pemako/mk/errors"
 	mw "github.com/pemako/mk/middleware/http"
 )
 
@@ -87,4 +89,87 @@ func TestIPFilter_whitelist_blocks(t *testing.T) {
 	req.RemoteAddr = "10.0.0.1:1234"
 	r.ServeHTTP(w, req)
 	assert.Equal(t, 403, w.Code)
+}
+
+func TestErrorHandler_CodedError_returns_correct_code(t *testing.T) {
+	r := gin.New()
+	r.Use(mw.ErrorHandler())
+	r.GET("/test", func(c *gin.Context) {
+		c.Error(errors.ErrNotFound) //nolint:errcheck
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 404, w.Code)
+	assert.Contains(t, w.Body.String(), "NOT_FOUND")
+}
+
+func TestErrorHandler_GenericError_returns_500(t *testing.T) {
+	r := gin.New()
+	r.Use(mw.ErrorHandler())
+	r.GET("/test", func(c *gin.Context) {
+		c.Error(fmt.Errorf("something internal")) //nolint:errcheck
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 500, w.Code)
+	assert.Contains(t, w.Body.String(), "INTERNAL")
+}
+
+func TestErrorHandler_NoError_passthrough(t *testing.T) {
+	r := gin.New()
+	r.Use(mw.ErrorHandler())
+	r.GET("/test", func(c *gin.Context) { c.String(200, "ok") })
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
+}
+
+func TestRequestID_generates_when_missing(t *testing.T) {
+	r := gin.New()
+	r.Use(mw.RequestID())
+	r.GET("/test", func(c *gin.Context) { c.String(200, c.GetString("request_id")) })
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
+	assert.NotEmpty(t, w.Header().Get(mw.HeaderRequestID))
+	assert.Equal(t, w.Header().Get(mw.HeaderRequestID), w.Body.String())
+}
+
+func TestRequestID_reuses_existing_header(t *testing.T) {
+	r := gin.New()
+	r.Use(mw.RequestID())
+	r.GET("/test", func(c *gin.Context) { c.String(200, c.GetString("request_id")) })
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	req.Header.Set(mw.HeaderRequestID, "my-custom-id")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, "my-custom-id", w.Header().Get(mw.HeaderRequestID))
+	assert.Equal(t, "my-custom-id", w.Body.String())
+}
+
+func TestRecovery_catches_panic(t *testing.T) {
+	r := gin.New()
+	r.Use(mw.Recovery())
+	r.GET("/panic", func(c *gin.Context) { panic("test panic") })
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/panic", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 500, w.Code)
+}
+
+func TestCORS_preflight_returns_204(t *testing.T) {
+	r := gin.New()
+	r.Use(mw.CORS(mw.CORSConfig{AllowOrigins: []string{"*"}}))
+	r.GET("/test", func(c *gin.Context) { c.String(200, "ok") })
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodOptions, "/test", nil)
+	req.Header.Set("Origin", "http://example.com")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, 204, w.Code)
+	assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Origin"))
 }
