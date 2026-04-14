@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 870">
+<style>.tt{font-family:"Helvetica Neue",Helvetica,Arial,sans-serif}</style>
+<defs><marker id="a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0 8 3 0 6" fill="#9CA3AF"/></marker></defs>
+<rect width="720" height="870" fill="#F9FAFB"/>
+<rect x="10" y="10" width="700" height="850" rx="14" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="1.5"/>
+<text x="360" y="44" class="tt" font-size="18" font-weight="bold" fill="#111827" text-anchor="middle">mk — 典型服务接入路径</text>
+<text x="360" y="60" class="tt" font-size="11" fill="#6B7280" text-anchor="middle">Typical service initialization order in main.go</text>
+<line x1="30" y1="70" x2="690" y2="70" stroke="#E5E7EB" stroke-width="1"/>
+<rect x="130" y="82" width="460" height="34" rx="7" fill="#EF06F0" stroke="#BFDBFE" stroke-width="1.5"/>
+<rect x="130" y="108" width="460" height="8" fill="#EF06F0" stroke="none"/>
+<circle cx="152" cy="99" r="13" fill="#2563EB"/>
+<text x="152" y="104" class="tt" font-size="12" font-weight="bold" fill="white" text-anchor="middle">1</text>
+<text x="174" y="104" class="tt" font-size="13" font-weight="bold" fill="#2563EB" text-anchor="start">Config + Logger</text>
+<rect x="130" y="116" width="460" height="70" rx="0" fill="white" stroke="#BFDBFE" stroke-width="1.5"/>
+<rect x="130" y="178" width="460" height="8" rx="7" fill="white" stroke="#BFDBFE" stroke-width="1.5"/>
+<rect x="130" y="178" width="460" height="8" fill="white" stroke="none"/>
+<rect x="130" y="178" width="460" height="8" rx="0" fill="white" stroke="#BFDBFE" stroke-width="1.5"/>
+<text x="154" y="134" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">cfg, _ := config.Load()   // YAML + env vars + hot reload</text>
+<text x="154" y="152" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">log, _ := logger.New(logger.WithConfig(cfg))</text>
+<text x="154" y="170" class="tt" font-size="11" fill="#059669" text-anchor="start">→ cfg and log are injected into every downstream component</text>
+<line x1="360" y1="186" x2="360" y2="200" stroke="#D1D5DB" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="130" y="200" width="460" height="34" rx="7" fill="#FAF5F0" stroke="#DDD6FE" stroke-width="1.5"/>
+<rect x="130" y="226" width="460" height="8" fill="#FAF5F0" stroke="none"/>
+<circle cx="152" cy="217" r="13" fill="#7C3AED"/>
+<text x="152" y="222" class="tt" font-size="12" font-weight="bold" fill="white" text-anchor="middle">2</text>
+<text x="174" y="222" class="tt" font-size="13" font-weight="bold" fill="#7C3AED" text-anchor="start">Observability</text>
+<rect x="480" y="209" width="98" height="16" rx="8" fill="white" stroke="#7C3AED" stroke-width="1.2"/>
+<text x="529" y="221" class="tt" font-size="9" font-weight="bold" fill="#7C3AED" text-anchor="middle">app.WithLifecycle(tp, mp)</text>
+<rect x="130" y="234" width="460" height="70" rx="0" fill="white" stroke="#DDD6FE" stroke-width="1.5"/>
+<rect x="130" y="296" width="460" height="8" rx="7" fill="white" stroke="#DDD6FE" stroke-width="1.5"/>
+<rect x="130" y="296" width="460" height="8" fill="white" stroke="none"/>
+<rect x="130" y="296" width="460" height="8" rx="0" fill="white" stroke="#DDD6FE" stroke-width="1.5"/>
+<text x="154" y="252" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">tp, _ := tracing.New(tracing.WithConfig(cfg), tracing.WithLogger(log))</text>
+<text x="154" y="270" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">mp, _ := metric.New(metric.WithConfig(cfg), metric.WithLogger(log))</text>
+<text x="154" y="288" class="tt" font-size="11" fill="#059669" text-anchor="start">→ implements app.Lifecycle  →  Init() before start, Shutdown() after stop</text>
+<line x1="360" y1="304" x2="360" y2="318" stroke="#D1D5DB" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="130" y="318" width="460" height="34" rx="7" fill="#F0FDF4" stroke="#A7F3D0" stroke-width="1.5"/>
+<rect x="130" y="344" width="460" height="8" fill="#F0FDF4" stroke="none"/>
+<circle cx="152" cy="335" r="13" fill="#059669"/>
+<text x="152" y="340" class="tt" font-size="12" font-weight="bold" fill="white" text-anchor="middle">3</text>
+<text x="174" y="340" class="tt" font-size="13" font-weight="bold" fill="#059669" text-anchor="start">Data Stores</text>
+<rect x="480" y="327" width="98" height="16" rx="8" fill="white" stroke="#059669" stroke-width="1.2"/>
+<text x="529" y="339" class="tt" font-size="9" font-weight="bold" fill="#059669" text-anchor="middle">WithMigration + WithCloser</text>
+<rect x="130" y="352" width="460" height="106" rx="0" fill="white" stroke="#A7F3D0" stroke-width="1.5"/>
+<rect x="130" y="450" width="460" height="8" rx="7" fill="white" stroke="#A7F3D0" stroke-width="1.5"/>
+<rect x="130" y="450" width="460" height="8" fill="white" stroke="none"/>
+<rect x="130" y="450" width="460" height="8" rx="0" fill="white" stroke="#A7F3D0" stroke-width="1.5"/>
+<text x="154" y="370" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">dbMgr, _ := database.New(database.WithConfig(cfg), ...)</text>
+<text x="154" y="388" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">database.Register("default", dbMgr)  // global access via database.DB()</text>
+<text x="154" y="406" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">cacheMgr, _ := cache.New(cache.WithConfig(cfg), ...)</text>
+<text x="154" y="424" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">cache.Register("default", cacheMgr)  // global access via cache.Client()</text>
+<text x="154" y="442" class="tt" font-size="11" fill="#059669" text-anchor="start">→ dbMgr: app.WithMigration  ·  cacheMgr: app.WithCloser</text>
+<line x1="360" y1="458" x2="360" y2="472" stroke="#D1D5DB" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="130" y="472" width="460" height="34" rx="7" fill="#FFF7ED" stroke="#FED7AA" stroke-width="1.5"/>
+<rect x="130" y="498" width="460" height="8" fill="#FFF7ED" stroke="none"/>
+<circle cx="152" cy="489" r="13" fill="#EA580C"/>
+<text x="152" y="494" class="tt" font-size="12" font-weight="bold" fill="white" text-anchor="middle">4</text>
+<text x="174" y="494" class="tt" font-size="13" font-weight="bold" fill="#EA580C" text-anchor="start">Infrastructure Clients</text>
+<rect x="500" y="481" width="68" height="16" rx="8" fill="#FEF3C7" stroke="#FCD34D" stroke-width="1"/>
+<text x="534" y="493" class="tt" font-size="9" font-weight="bold" fill="#92400E" text-anchor="middle">optional</text>
+<rect x="130" y="506" width="460" height="70" rx="0" fill="white" stroke="#FED7AA" stroke-width="1.5"/>
+<rect x="130" y="568" width="460" height="8" rx="7" fill="white" stroke="#FED7AA" stroke-width="1.5"/>
+<rect x="130" y="568" width="460" height="8" fill="white" stroke="none"/>
+<rect x="130" y="568" width="460" height="8" rx="0" fill="white" stroke="#FED7AA" stroke-width="1.5"/>
+<text x="154" y="524" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">locker := lock.NewWithClient(cache.RedisClient("redis"), ...)</text>
+<text x="154" y="542" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">httpclient.Register("svc", httpclient.New(httpclient.WithBaseURL(...)))</text>
+<text x="154" y="560" class="tt" font-size="10" fill="#9CA3AF" text-anchor="start"># stream, cron, storage — add as needed</text>
+<line x1="360" y1="576" x2="360" y2="590" stroke="#D1D5DB" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="130" y="590" width="460" height="34" rx="7" fill="#F0FDFA" stroke="#99F6E4" stroke-width="1.5"/>
+<rect x="130" y="616" width="460" height="8" fill="#F0FDFA" stroke="none"/>
+<circle cx="152" cy="607" r="13" fill="#0D9488"/>
+<text x="152" y="612" class="tt" font-size="12" font-weight="bold" fill="white" text-anchor="middle">5</text>
+<text x="174" y="612" class="tt" font-size="13" font-weight="bold" fill="#0D9488" text-anchor="start">HTTP Server</text>
+<rect x="480" y="599" width="98" height="16" rx="8" fill="white" stroke="#0D9488" stroke-width="1.2"/>
+<text x="529" y="611" class="tt" font-size="9" font-weight="bold" fill="#0D9488" text-anchor="middle">app.WithServer(httpSrv)</text>
+<rect x="130" y="624" width="460" height="106" rx="0" fill="white" stroke="#99F6E4" stroke-width="1.5"/>
+<rect x="130" y="722" width="460" height="8" rx="7" fill="white" stroke="#99F6E4" stroke-width="1.5"/>
+<rect x="130" y="722" width="460" height="8" fill="white" stroke="none"/>
+<rect x="130" y="722" width="460" height="8" rx="0" fill="white" stroke="#99F6E4" stroke-width="1.5"/>
+<text x="154" y="642" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">httpSrv, _ := httpserver.New(</text>
+<text x="154" y="660" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">    httpserver.WithConfig(cfg), httpserver.WithLogger(log),</text>
+<text x="154" y="678" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">    httpserver.WithOpenAPI("My API","v1","/docs"),  // optional</text>
+<text x="154" y="696" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">    httpserver.WithHealthChecks(dbMgr.HealthChecker("default"), ...),</text>
+<text x="154" y="714" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">)</text>
+<line x1="360" y1="730" x2="360" y2="744" stroke="#D1D5DB" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="130" y="744" width="460" height="34" rx="7" fill="#EEF2F0" stroke="#C7D2FE" stroke-width="1.5"/>
+<rect x="130" y="770" width="460" height="8" fill="#EEF2F0" stroke="none"/>
+<circle cx="152" cy="761" r="13" fill="#4F46E5"/>
+<text x="152" y="766" class="tt" font-size="12" font-weight="bold" fill="white" text-anchor="middle">6</text>
+<text x="174" y="766" class="tt" font-size="13" font-weight="bold" fill="#4F46E5" text-anchor="start">Register Routes</text>
+<rect x="130" y="778" width="460" height="52" rx="0" fill="white" stroke="#C7D2FE" stroke-width="1.5"/>
+<rect x="130" y="822" width="460" height="8" rx="7" fill="white" stroke="#C7D2FE" stroke-width="1.5"/>
+<rect x="130" y="822" width="460" height="8" fill="white" stroke="none"/>
+<rect x="130" y="822" width="460" height="8" rx="0" fill="white" stroke="#C7D2FE" stroke-width="1.5"/>
+<text x="154" y="796" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">huma.Register(httpSrv.API(), huma.Operation{...}, handler)</text>
+<text x="154" y="814" class="tt" font-size="11" fill="#1F2937" font-family="Courier New,monospace" text-anchor="start">// or: httpSrv.Engine().GET("/path", ginHandler)</text>
+<line x1="360" y1="830" x2="360" y2="844" stroke="#D1D5DB" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="130" y="844" width="460" height="98" rx="8" fill="#1E293B" stroke="#334155" stroke-width="1.5"/>
+<circle cx="152" cy="870" r="13" fill="#38BDF8"/>
+<text x="152" y="875" class="tt" font-size="12" font-weight="bold" fill="#0F172A" text-anchor="middle">7</text>
+<text x="174" y="875" class="tt" font-size="13" font-weight="bold" fill="#F1F5F9" text-anchor="start">Wire + Run</text>
+<text x="154" y="894" class="tt" font-size="11" fill="#94A3B8" font-family="Courier New,monospace" text-anchor="start">if err := app.New(</text>
+<text x="154" y="910" class="tt" font-size="11" fill="#94A3B8" font-family="Courier New,monospace" text-anchor="start">    app.WithServer(httpSrv),  app.WithMigration(dbMgr),</text>
+<text x="154" y="926" class="tt" font-size="11" fill="#94A3B8" font-family="Courier New,monospace" text-anchor="start">    app.WithLifecycle(tp, mp), app.WithCloser(cacheMgr),</text>
+<text x="154" y="942" class="tt" font-size="11" fill="#94A3B8" font-family="Courier New,monospace" text-anchor="start">    app.WithLogger(log),</text>
+<text x="154" y="958" class="tt" font-size="11" fill="#94A3B8" font-family="Courier New,monospace" text-anchor="start">).Run(); err != nil { log.Fatal(err) }</text>
+<line x1="360" y1="942" x2="360" y2="956" stroke="#D1D5DB" stroke-width="1.5" marker-end="url(#a)"/>
+<circle cx="360" cy="972" r="18" fill="#111827"/>
+<circle cx="360" cy="972" r="12" fill="none" stroke="white" stroke-width="2.5"/>
+<text x="360" y="977" class="tt" font-size="10" fill="white" text-anchor="middle">end</text>
+<rect x="604" y="96" width="128" height="234" rx="8" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2"/>
+<text x="668" y="112" class="tt" font-size="10" font-weight="bold" fill="#6B7280" text-anchor="middle">app.New() roles</text>
+<rect x="612" y="136" width="112" height="30" rx="5" fill="white" stroke="#7C3AED" stroke-width="1"/>
+<text x="668" y="149" class="tt" font-size="10" font-weight="bold" fill="#7C3AED" text-anchor="middle">WithLifecycle()</text>
+<text x="668" y="161" class="tt" font-size="9" fill="#64748B" text-anchor="middle">tp, mp</text>
+<rect x="612" y="172" width="112" height="30" rx="5" fill="white" stroke="#059669" stroke-width="1"/>
+<text x="668" y="185" class="tt" font-size="10" font-weight="bold" fill="#059669" text-anchor="middle">WithMigration()</text>
+<text x="668" y="197" class="tt" font-size="9" fill="#64748B" text-anchor="middle">dbMgr</text>
+<rect x="612" y="208" width="112" height="30" rx="5" fill="white" stroke="#059669" stroke-width="1"/>
+<text x="668" y="221" class="tt" font-size="10" font-weight="bold" fill="#059669" text-anchor="middle">WithCloser()</text>
+<text x="668" y="233" class="tt" font-size="9" fill="#64748B" text-anchor="middle">cacheMgr</text>
+<rect x="612" y="244" width="112" height="30" rx="5" fill="white" stroke="#0D9488" stroke-width="1"/>
+<text x="668" y="257" class="tt" font-size="10" font-weight="bold" fill="#0D9488" text-anchor="middle">WithServer()</text>
+<text x="668" y="269" class="tt" font-size="9" fill="#64748B" text-anchor="middle">httpSrv</text>
+<text x="668" y="294" class="tt" font-size="9" fill="#94A3B8" text-anchor="middle">order matters ↑</text>
+<line x1="30" y1="1000" x2="690" y2="1000" stroke="#F1F5F9" stroke-width="1"/>
+<rect x="40" y="1010" width="10" height="10" rx="2" fill="#2563EB"/>
+<text x="54" y="1020" class="tt" font-size="10" fill="#374151">Required (every service)</text>
+<rect x="250" y="1010" width="10" height="10" rx="2" fill="#EA580C"/>
+<text x="264" y="1020" class="tt" font-size="10" fill="#374151">Optional — add as needed</text>
+<rect x="450" y="1010" width="10" height="10" rx="2" fill="#0F172A"/>
+<text x="464" y="1020" class="tt" font-size="10" fill="#374151">app.New() wires everything together</text>
+</svg>
