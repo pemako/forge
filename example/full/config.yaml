@@ -2,6 +2,8 @@ app:
   name: full-example-service
   version: v0.1.0
   env: development
+  region: cn-hangzhou # custom: mapped to attribute.String("region", ...)
+  cluster: local # custom: mapped to attribute.String("cluster", ...)
 
 server:
   http:

@@ -30,6 +30,7 @@ import (
 	"github.com/pemako/mk/storage"
 	"github.com/pemako/mk/stream"
 	"github.com/pemako/mk/tracing"
+	"go.opentelemetry.io/otel/attribute"
 
 	httphandler "github.com/pemako/mk/example/full/internal/handler/http"
 	"github.com/pemako/mk/example/full/internal/model"
@@ -64,7 +65,19 @@ func main() {
 	// ── Tracing ───────────────────────────────────────────────────────────
 	// tracing.Provider implements app.Lifecycle (Init is a no-op; Shutdown
 	// flushes pending spans). Pass it to app.WithLifecycle for automatic teardown.
-	tracingProvider, err := tracing.New(tracing.WithConfig(cfg), tracing.WithLogger(log))
+	//
+	// WithAttributes appends custom resource attributes that appear on every span.
+	// Use this for dimensions that are specific to your deployment and not covered
+	// by the standard options (service.name / service.version / deployment.environment).
+	tracingProvider, err := tracing.New(
+		tracing.WithConfig(cfg),
+		tracing.WithLogger(log),
+		tracing.WithAttributes(
+			attribute.String("region", cfg.GetString("app.region")),
+			attribute.String("cluster", cfg.GetString("app.cluster")),
+			attribute.Bool("atls.full.collect", true),
+		),
+	)
 	if err != nil {
 		log.Error(context.Background(), "tracing init failed", logger.F("err", err))
 		os.Exit(1)
