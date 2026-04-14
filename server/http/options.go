@@ -38,6 +38,9 @@ type options struct {
 	listener        net.Listener
 	readyChecks     []readyCheck
 	middlewareStack []gin.HandlerFunc // nil = use default stack; non-nil = use as-is (may be empty)
+	openAPITitle    string            // empty = OpenAPI disabled
+	openAPIVersion  string
+	openAPIPath     string // path to serve Swagger UI, e.g. "/docs"
 }
 
 // Option is a functional option for configuring the HTTP server.
@@ -178,4 +181,28 @@ func WithMiddlewareStack(middlewares ...gin.HandlerFunc) Option {
 // Without ErrorHandler(), c.Error() calls will not produce JSON responses.
 func WithNoMiddleware() Option {
 	return WithMiddlewareStack()
+}
+
+// WithOpenAPI enables the Huma API layer on this server. When set:
+//   - srv.API() returns a huma.API for registering type-safe, auto-documented routes.
+//   - Swagger UI is served at docsPath (e.g. "/docs").
+//   - OpenAPI JSON spec is served at docsPath + "/openapi.json".
+//
+// When not set (default), srv.API() returns nil and no documentation is served.
+// Existing gin routes registered via srv.Engine() are unaffected.
+//
+// Example:
+//
+//	srv, _ := httpserver.New(
+//	    httpserver.WithOpenAPI("My Service", "1.0.0", "/docs"),
+//	)
+//	huma.Register(srv.API(), huma.Operation{
+//	    Method: "GET", Path: "/users/{id}", Summary: "Get user",
+//	}, handler)
+func WithOpenAPI(title, version, docsPath string) Option {
+	return func(o *options) {
+		o.openAPITitle   = title
+		o.openAPIVersion = version
+		o.openAPIPath    = docsPath
+	}
 }

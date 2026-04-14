@@ -3,7 +3,7 @@ module github.com/pemako/mk/example/quickstart
 go 1.26
 
 require (
-	github.com/gin-gonic/gin v1.12.0
+	github.com/danielgtaylor/huma/v2 v2.37.3
 	github.com/pemako/mk v0.0.0
 )
 
@@ -17,6 +17,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/gin-contrib/sse v1.1.1 // indirect
+	github.com/gin-gonic/gin v1.12.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect

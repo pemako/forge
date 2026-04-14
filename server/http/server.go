@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humagin"
 	"github.com/gin-gonic/gin"
 
 	"github.com/pemako/mk/core"
@@ -15,6 +17,7 @@ import (
 type ginServer struct {
 	opts  options
 	r     *gin.Engine
+	api   huma.API // nil when WithOpenAPI not provided
 	srv   *http.Server
 	ready atomic.Bool
 }
@@ -94,6 +97,13 @@ func New(opts ...Option) (*ginServer, error) {
 		return s.opts.readyChecks
 	}))
 
+	// Initialise Huma API layer when WithOpenAPI is configured.
+	if o.openAPITitle != "" {
+		humaConfig := huma.DefaultConfig(o.openAPITitle, o.openAPIVersion)
+		humaConfig.DocsPath = o.openAPIPath
+		s.api = humagin.New(r, humaConfig)
+	}
+
 	return s, nil
 }
 
@@ -118,6 +128,11 @@ func (s *ginServer) SetReady(ready bool) { s.ready.Store(ready) }
 // Engine returns the underlying *gin.Engine so callers can register
 // application-specific routes and middleware after server creation.
 func (s *ginServer) Engine() *gin.Engine { return s.r }
+
+// API returns the huma.API for registering type-safe, auto-documented routes.
+// Returns nil if WithOpenAPI was not provided at construction time.
+// Use huma.Register(srv.API(), ...) to register handlers.
+func (s *ginServer) API() huma.API { return s.api }
 
 // Addr returns the address the server is listening on.
 func (s *ginServer) Addr() string { return s.srv.Addr }
