@@ -106,8 +106,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── Distributed Lock (reads lock.addr from config) ────────────────────
-	locker := lock.NewFromConfig(cfg, lock.WithLogger(log))
+	// ── Distributed Lock — reuses the Redis client from cache (no new connection)
+	// cache.RedisClient("redis") returns the *redis.Client registered under "redis".
+	locker := lock.NewWithClient(cache.RedisClient("redis"), lock.WithLogger(log))
 
 	// ── Circuit Breaker ───────────────────────────────────────────────────
 	cb := circuitbreaker.New("jsonplaceholder",
