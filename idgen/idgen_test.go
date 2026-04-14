@@ -185,3 +185,31 @@ func (s *stubConfig) GetDuration(key string) time.Duration { return 0 }
 func (s *stubConfig) GetStringSlice(key string) []string   { return nil }
 func (s *stubConfig) Scan(key string, dest any) error      { return nil }
 func (s *stubConfig) Watch(key string, fn func(any)) error { return nil }
+
+func TestNew_WithRequireExplicitWorkerID_DerivedFails(t *testing.T) {
+	// No WithWorkerID → derived from IP → WithRequireExplicitWorkerID must reject it.
+	_, err := idgen.New(idgen.WithRequireExplicitWorkerID())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "worker_id must be set explicitly")
+}
+
+func TestNew_WithRequireExplicitWorkerID_ExplicitPasses(t *testing.T) {
+	// Explicit WorkerID + require flag → must succeed.
+	g, err := idgen.New(
+		idgen.WithWorkerID(42),
+		idgen.WithRequireExplicitWorkerID(),
+	)
+	require.NoError(t, err)
+	assert.Greater(t, g.Next(), int64(0))
+}
+
+func TestNew_WithRequireExplicitWorkerID_ConfigPasses(t *testing.T) {
+	// worker_id set via config → derived=false → must succeed even with require flag.
+	cfg := newStubConfig(map[string]string{"idgen.worker_id": "7"})
+	g, err := idgen.New(
+		idgen.WithConfig(cfg),
+		idgen.WithRequireExplicitWorkerID(),
+	)
+	require.NoError(t, err)
+	assert.Greater(t, g.Next(), int64(0))
+}

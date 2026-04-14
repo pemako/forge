@@ -14,9 +14,10 @@ import (
 
 // options holds functional configuration for a Generator.
 type options struct {
-	workerID int64
-	log      core.Logger
-	derived  bool // true when workerID was derived from IP (not explicitly set)
+	workerID        int64
+	log             core.Logger
+	derived         bool // true when workerID was derived from IP (not explicitly set)
+	requireExplicit bool // if true, New() returns an error when workerID is derived
 }
 
 // Option configures a Generator.
@@ -50,6 +51,21 @@ func WithConfig(cfg core.Config) Option {
 			o.derived = false
 		}
 	}
+}
+
+// WithRequireExplicitWorkerID makes New() return an error if the worker ID was
+// derived from the host IP rather than set explicitly via WithWorkerID or
+// WithConfig. Use this in production services to prevent silent ID collisions
+// caused by multiple instances sharing the same derived ID.
+//
+// Place this option last so it takes effect after WithConfig:
+//
+//	gen, err := idgen.New(
+//	    idgen.WithConfig(cfg),
+//	    idgen.WithRequireExplicitWorkerID(),
+//	)
+func WithRequireExplicitWorkerID() Option {
+	return func(o *options) { o.requireExplicit = true }
 }
 
 func defaultOptions() options {
@@ -100,13 +116,21 @@ type Generator struct {
 
 // New creates a Generator with the given options.
 // Returns an error if the worker ID is out of the valid range [0, 1023].
-// Logs a Warn if the worker ID was derived from the host IP (not explicitly set).
+// Returns an error if WithRequireExplicitWorkerID is set and the worker ID
+// was derived from the host IP rather than set explicitly.
+// Logs a Warn if the worker ID was derived from the host IP (not explicitly set)
+// and WithRequireExplicitWorkerID is not set.
 func New(opts ...Option) (*Generator, error) {
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(&o)
 	}
 	if o.derived {
+		if o.requireExplicit {
+			return nil, errors.Wrap(errors.ErrBadRequest,
+				"idgen: worker_id must be set explicitly in production; "+
+					"use WithWorkerID or set idgen.worker_id in config to avoid ID collisions across instances")
+		}
 		o.log.Warn(context.Background(), "idgen: worker_id derived from host IP — set WithWorkerID or idgen.worker_id to avoid collisions in multi-instance deployments")
 	}
 	node, err := snowflake.NewNode(o.workerID)

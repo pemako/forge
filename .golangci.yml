@@ -17,6 +17,7 @@ linters:
     - unconvert # unnecessary type conversions
     - godot # check comment periods
     - noctx # http.NewRequest without context
+    - depguard # enforce package import constraints
 
 linters-settings:
   errcheck:
@@ -29,6 +30,47 @@ linters-settings:
   godot:
     scope: declarations
     capital: false
+  depguard:
+    rules:
+      # core/ and errors/ are zero-dependency foundations.
+      # They must never import any other mk package.
+      core-no-mk-imports:
+        files:
+          - "**/core/*.go"
+          - "!**/*_test.go"
+        deny:
+          - pkg: "github.com/pemako/mk/"
+            desc: "core/ must not import any other mk package — it is the zero-dependency foundation"
+      errors-no-mk-imports:
+        files:
+          - "**/errors/*.go"
+          - "!**/*_test.go"
+        deny:
+          - pkg: "github.com/pemako/mk/"
+            desc: "errors/ must not import any other mk package — it is the zero-dependency foundation"
+      # app/ must not import infrastructure packages.
+      # All dependencies are passed in as interface values (core.Server, app.Lifecycle, etc.).
+      app-no-infra-imports:
+        files:
+          - "**/app/*.go"
+          - "!**/*_test.go"
+        deny:
+          - pkg: "github.com/pemako/mk/database"
+            desc: "app/ must not import database directly; pass *database.Manager as app.Migrator"
+          - pkg: "github.com/pemako/mk/cache"
+            desc: "app/ must not import cache directly; pass *cache.Manager as app.Closer"
+          - pkg: "github.com/pemako/mk/metric"
+            desc: "app/ must not import metric directly; pass *metric.Provider as app.Lifecycle"
+          - pkg: "github.com/pemako/mk/tracing"
+            desc: "app/ must not import tracing directly; pass *tracing.Provider as app.Lifecycle"
+          - pkg: "github.com/pemako/mk/server/http"
+            desc: "app/ must not import server packages; pass servers via core.Server interface"
+          - pkg: "github.com/pemako/mk/server/grpc"
+            desc: "app/ must not import server packages; pass servers via core.Server interface"
+          - pkg: "github.com/pemako/mk/middleware/http"
+            desc: "app/ must not import middleware packages"
+          - pkg: "github.com/pemako/mk/middleware/grpc"
+            desc: "app/ must not import middleware packages"
 
 issues:
   exclude-rules:
