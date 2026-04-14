@@ -19,9 +19,6 @@ import (
 	"github.com/pemako/mk/database"
 	"github.com/pemako/mk/errors"
 	"github.com/pemako/mk/event"
-	httphandler "github.com/pemako/mk/example/full/internal/handler/http"
-	"github.com/pemako/mk/example/full/internal/model"
-	"github.com/pemako/mk/example/full/internal/service"
 	"github.com/pemako/mk/httpclient"
 	"github.com/pemako/mk/lock"
 	"github.com/pemako/mk/logger"
@@ -33,6 +30,10 @@ import (
 	"github.com/pemako/mk/storage"
 	"github.com/pemako/mk/stream"
 	"github.com/pemako/mk/tracing"
+
+	httphandler "github.com/pemako/mk/example/full/internal/handler/http"
+	"github.com/pemako/mk/example/full/internal/model"
+	"github.com/pemako/mk/example/full/internal/service"
 )
 
 var (
@@ -98,6 +99,10 @@ func main() {
 	)
 	if err != nil {
 		log.Error(context.Background(), "database init failed", logger.F("err", err))
+		os.Exit(1)
+	}
+	if err := database.Register("default", dbMgr); err != nil {
+		log.Error(context.Background(), "database register failed", logger.F("err", err))
 		os.Exit(1)
 	}
 
