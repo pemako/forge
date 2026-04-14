@@ -3,6 +3,23 @@
 // in response to SIGTERM or SIGINT, giving each registered server time to
 // drain in-flight requests.
 //
+// # Design boundary: orchestrator, not container
+//
+// app is a process lifecycle orchestrator. It sequences the startup and
+// shutdown of components that are passed into it. It does not own, discover,
+// or vend those components.
+//
+// app will never:
+//   - Act as a global dependency registry or service locator
+//   - Distribute configuration to registered components
+//   - Route requests or messages between business modules
+//   - Support dynamic component registration after Run() starts
+//   - Replace constructor injection with runtime lookup
+//
+// If you find yourself wanting app to hold a reference so other code can
+// retrieve it later, that is a sign the dependency should be injected
+// directly at construction time instead.
+//
 // Typical usage:
 //
 //	a := app.New(

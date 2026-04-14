@@ -195,7 +195,40 @@ type Closer interface {
 9. AfterStop hooks                 sequential
 ```
 
-## 6. Server Middleware Stacks
+### app orchestrator principle
+
+`app` is an **orchestrator**, not a container or service locator. It sequences the startup and shutdown of components that are passed into it. It does not own, discover, or vend those components.
+
+**Legitimate responsibilities** (current and future-safe):
+
+| Category | Examples |
+|----------|---------|
+| Startup sequencing | Migrations → Lifecycle.Init → BeforeStart hooks → Server.Start |
+| Shutdown sequencing | Server.Stop → Lifecycle.Shutdown → Closer.Close → AfterStop hooks |
+| Timing and policy | `WithShutdownTimeout`, deadline propagation |
+| Identity metadata | `WithName`, `WithVersion` (used in health check responses) |
+| Observability wiring | `WithLogger`, `WithHealthCheck` (centralised collection for bridging into server/http) |
+
+**Will never be added to app:**
+
+| Pattern | Why not |
+|---------|---------|
+| `app.Get("database")` — dependency lookup | Turns app into a service locator; hides coupling, breaks testability |
+| `app.WithConfig(cfg)` distributing config to components | Config belongs at construction time, not through the orchestrator |
+| `app.RegisterModule("user", m)` — business routing | Business logic is outside the orchestrator's scope |
+| Dynamic component registration after `Run()` starts | Orchestration requires a fixed, known set of components at startup |
+| `app.Provide` / `app.Invoke` — DI container | Use explicit constructor injection; avoid implicit wiring |
+
+**Adding a new option to app: decision checklist**
+
+Before proposing a new `WithXxx` option, answer:
+
+1. Does it control when or how a component starts or stops? → probably fine
+2. Does it let app hold a reference that other code will later retrieve? → likely a service locator, reject
+3. Does it push data or configuration into components on their behalf? → constructor injection is better
+4. Does it add business-domain awareness to the orchestrator? → always reject
+
+
 
 ### HTTP Default Stack
 
