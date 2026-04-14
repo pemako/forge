@@ -41,12 +41,12 @@ c := cache.Client("default")
 
 `database`、`cache`、`httpclient`、`grpcclient`、`storage`、`idgen` 等包遵循统一的注册表契约：
 
-| 函数 | 行为 |
-|------|------|
+| 函数                       | 行为                                          |
+| -------------------------- | --------------------------------------------- |
 | `Register(name, instance)` | 名称重复时返回 `ErrAlreadyRegistered`，不覆盖 |
-| `Replace(name, instance)` | 关闭旧实例后存入新实例 |
-| `Get(name)` | 不存在时返回 nil |
-| `CloseAll() error` | 释放所有资源并清空注册表 |
+| `Replace(name, instance)`  | 关闭旧实例后存入新实例                        |
+| `Get(name)`                | 不存在时返回 nil                              |
+| `CloseAll() error`         | 释放所有资源并清空注册表                      |
 
 **注意**：`Register` 接收的是已创建好的实例，而非配置选项。先用 `New()` 创建，再传给 `Register`——这让构造错误显式可见。
 
@@ -117,12 +117,12 @@ func main() {
 
 Forge 将 27 个包划分为四个层级，具有不同的稳定性承诺：
 
-| 层级 | 包 | 稳定性 |
-|------|----|--------|
-| **Tier 1 核心稳定层** | `core` `errors` `app` `config` `logger` | 接口和行为冻结，破坏性变更需要主版本号升级 |
+| 层级                    | 包                                                                                                                         | 稳定性                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **Tier 1 核心稳定层**   | `core` `errors` `app` `config` `logger`                                                                                    | 接口和行为冻结，破坏性变更需要主版本号升级         |
 | **Tier 2 基础设施集成** | `server/*` `middleware/*` `database` `cache` `tracing` `metric` `httpclient` `grpcclient` `lock` `stream` `cron` `storage` | API 稳定，仅追加变更；外部依赖升级可能带来行为变化 |
-| **Tier 3 观点型扩展** | `auth` `validate` `pagination` `ratelimit` `notify` `idgen` `circuitbreaker` `pprof` | 可用于生产，但有一定约束性；团队可用自己的实现替换 |
-| **开发工具** | `testutil` `event` | 辅助工具，无跨服务 API 契约 |
+| **Tier 3 观点型扩展**   | `auth` `validate` `pagination` `ratelimit` `notify` `idgen` `circuitbreaker` `pprof`                                       | 可用于生产，但有一定约束性；团队可用自己的实现替换 |
+| **开发工具**            | `testutil` `event`                                                                                                         | 辅助工具，无跨服务 API 契约                        |
 
 > **实践建议**：从核心稳定层起步，按需引入基础设施集成，Tier 3 扩展包按实际约定决定是否采用。
 
@@ -268,11 +268,12 @@ log.Error(ctx, "查询失败", logger.F("err", err))
 ```
 
 **配置示例**：
+
 ```yaml
 logger:
-  level: info          # debug | info | warn | error
-  output: both         # console | file | both
-  filename: logs/app   # 按级别分文件：app.info.log, app.error.log
+  level: info # debug | info | warn | error
+  output: both # console | file | both
+  filename: logs/app # 按级别分文件：app.info.log, app.error.log
   mask_fields: [password, token, credit_card]
 ```
 
@@ -295,10 +296,11 @@ err := database.DB("default").WithContext(ctx).
 ```
 
 **配置示例**：
+
 ```yaml
 database:
-  default:             # Manager 注册名
-    driver: mysql      # mysql | postgres | sqlite
+  default: # Manager 注册名
+    driver: mysql # mysql | postgres | sqlite
     dsn: "user:pass@tcp(localhost:3306)/mydb?parseTime=true"
     max_open_conns: 20
     max_idle_conns: 5
@@ -352,6 +354,7 @@ func (h *Handler) Get(c *gin.Context) {
 ```
 
 **错误响应格式**（ErrorHandler 中间件自动生成）：
+
 ```json
 {
   "code": 404,
@@ -529,11 +532,12 @@ app.New(app.WithLifecycle(tp)).Run()
 ```
 
 **配置示例**：
+
 ```yaml
 tracing:
-  endpoint: "otel-collector:4317"  # gRPC 端口自动选 OTLP/gRPC，其余用 HTTP
-  sampler: 0.1                      # 采样率，1.0 = 全采
-  tls: false                        # 是否启用 TLS
+  endpoint: "otel-collector:4317" # gRPC 端口自动选 OTLP/gRPC，其余用 HTTP
+  sampler: 0.1 # 采样率，1.0 = 全采
+  tls: false # 是否启用 TLS
 ```
 
 ### lock — 分布式锁
@@ -567,6 +571,7 @@ c.JSON(200, pagination.New(total, users, p))
 ```
 
 **响应格式**：
+
 ```json
 {
   "total": 100,
@@ -586,7 +591,7 @@ c.JSON(200, pagination.New(total, users, p))
 app:
   name: my-service
   version: v1.0.0
-  env: production        # development | staging | production
+  env: production # development | staging | production
 
 server:
   http:
@@ -597,7 +602,7 @@ server:
 
 database:
   default:
-    driver: mysql        # mysql | postgres | sqlite
+    driver: mysql # mysql | postgres | sqlite
     dsn: "user:pass@tcp(mysql:3306)/mydb?parseTime=true"
     max_open_conns: 20
     max_idle_conns: 5
@@ -605,16 +610,16 @@ database:
 
 cache:
   default:
-    backend: memory      # 普通缓存用内存
+    backend: memory # 普通缓存用内存
   redis:
-    backend: redis       # lock/stream 共用此连接
+    backend: redis # lock/stream 共用此连接
     addr: "redis:6379"
     password: ""
     db: 0
 
 logger:
   level: info
-  output: both           # console | file | both
+  output: both # console | file | both
   filename: logs/app
   mask_fields: [password, token]
 
@@ -630,7 +635,7 @@ metric:
   prometheus_addr: :9091
 
 idgen:
-  worker_id: 1           # 生产环境必须显式设置，容器中 IP 可能重复
+  worker_id: 1 # 生产环境必须显式设置，容器中 IP 可能重复
 ```
 
 ---
@@ -670,15 +675,15 @@ func (h *Handler) Get(c *gin.Context) {
 
 ### 内置哨兵错误
 
-| 变量 | HTTP 状态码 | Reason |
-|------|------------|--------|
-| `errors.ErrBadRequest` | 400 | BAD_REQUEST |
-| `errors.ErrUnauthorized` | 401 | UNAUTHORIZED |
-| `errors.ErrForbidden` | 403 | FORBIDDEN |
-| `errors.ErrNotFound` | 404 | NOT_FOUND |
-| `errors.ErrConflict` | 409 | CONFLICT |
-| `errors.ErrTooMany` | 429 | TOO_MANY_REQUEST |
-| `errors.ErrInternal` | 500 | INTERNAL |
+| 变量                     | HTTP 状态码 | Reason           |
+| ------------------------ | ----------- | ---------------- |
+| `errors.ErrBadRequest`   | 400         | BAD_REQUEST      |
+| `errors.ErrUnauthorized` | 401         | UNAUTHORIZED     |
+| `errors.ErrForbidden`    | 403         | FORBIDDEN        |
+| `errors.ErrNotFound`     | 404         | NOT_FOUND        |
+| `errors.ErrConflict`     | 409         | CONFLICT         |
+| `errors.ErrTooMany`      | 429         | TOO_MANY_REQUEST |
+| `errors.ErrInternal`     | 500         | INTERNAL         |
 
 ---
 
@@ -696,7 +701,7 @@ Forge 的可观测性组件开箱即用，无需额外配置即可启用基础�
 
 ```yaml
 metric:
-  prometheus_addr: :9091  # Prometheus 抓取地址
+  prometheus_addr: :9091 # Prometheus 抓取地址
 ```
 
 - HTTP 请求数、延迟、错误率自动采集（无需代码改动）
@@ -765,7 +770,7 @@ A: 生产环境**必须**显式设置，容器环境中 IP 末位字节可能重
 
 ```yaml
 idgen:
-  worker_id: 42  # 每个实例唯一，范围 0-1023
+  worker_id: 42 # 每个实例唯一，范围 0-1023
 ```
 
 ---
@@ -774,7 +779,3 @@ idgen:
 
 - [架构设计文档](./ARCHITECTURE.md) — 包依赖规则、设计模式、接口契约
 - [接入手册](./docs/getting-started.md) — 四种场景的完整示例代码
-- [架构图](./docs/mk-architecture.png) — 包分层可视化
-- [生命周期图](./docs/mk-lifecycle.png) — app.Run() 流程图
-- [接入路径图](./docs/mk-service-path.png) — main.go 初始化顺序
-- [完整示例](./example/full/) — 包含所有包的实际接入代码

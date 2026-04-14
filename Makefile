@@ -46,19 +46,6 @@ clean:
 	go clean ./...
 	rm -f coverage.out coverage.html
 
-## example-build: build both example services (quickstart and full)
-example-build:
-	cd example/quickstart && go build ./...
-	cd example/full && go build ./...
-
-## example-run: run the quickstart example service
-example-run:
-	cd example/quickstart && go run .
-
-## example-run-full: run the full example service
-example-run-full:
-	cd example/full && go run .
-
 ## help: show this help
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'
