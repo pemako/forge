@@ -9,7 +9,6 @@ import (
 	"github.com/pemako/mk/core"
 	"github.com/redis/go-redis/v9"
 )
-
 type streamWorker struct {
 	bus  *Bus
 	done chan struct{}
@@ -66,7 +65,16 @@ func (w *streamWorker) Stop(_ context.Context) error {
 }
 
 func (w *streamWorker) consume(sub subscription) {
-	ctx := context.Background()
+	// Create a context that is cancelled when the worker is stopped.
+	// This allows XREADGROUP BLOCK 0 (infinite block) to be interrupted
+	// cleanly on shutdown instead of waiting for the next poll cycle.
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-w.done
+		cancel()
+	}()
+	defer cancel()
+
 	for {
 		select {
 		case <-w.done:
@@ -79,13 +87,20 @@ func (w *streamWorker) consume(sub subscription) {
 			Consumer: sub.consumer,
 			Streams:  []string{sub.topic, ">"},
 			Count:    10,
-			Block:    2 * time.Second,
+			// Block: 0 = wait indefinitely for new messages.
+			// go-redis sets no TCP deadline for BLOCK 0, so the connection
+			// never times out. Shutdown is handled by cancelling ctx above.
+			Block: 0,
 		}).Result()
 
 		if err == redis.Nil {
 			continue
 		}
 		if err != nil {
+			// Context cancelled = clean shutdown; exit silently.
+			if ctx.Err() != nil {
+				return
+			}
 			select {
 			case <-w.done:
 				return

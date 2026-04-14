@@ -25,6 +25,9 @@ func newRedisCache(name, addr, password string, db int, log core.Logger) (*redis
 		// XREADGROUP BLOCK returns a null type that the RESP3 reader does not
 		// handle correctly, causing the read to hang until the TCP deadline.
 		Protocol: 2,
+		// Respect context cancellation so stream workers can interrupt blocking
+		// reads (XREADGROUP BLOCK 0) cleanly when the app shuts down.
+		ContextTimeoutEnabled: true,
 	})
 	pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	err := rdb.Ping(pingCtx).Err()
