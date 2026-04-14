@@ -244,6 +244,8 @@ func main() {
 			dbMgr.HealthChecker("default"),
 			cacheMgr.HealthChecker("default"),
 		),
+		// Enable Huma: OpenAPI spec + Swagger UI at /docs.
+		httpserver.WithOpenAPI("Full Example API", cfg.GetString("app.version"), "/docs"),
 	)
 	if err != nil {
 		log.Error(context.Background(), "http server init failed", logger.F("err", err))
@@ -262,21 +264,14 @@ func main() {
 
 	// ── Service & Handlers ────────────────────────────────────────────────
 	userSvc := service.NewUserService(bus, cb, locker)
-	userHandler := httphandler.NewUserHandler(userSvc)
+
+	// Register all user-domain routes via Huma so they appear in the
+	// OpenAPI spec at /docs. Huma runs on top of Gin — the default
+	// middleware stack (RequestID, Logger, Metrics, Recovery, ErrorHandler)
+	// still applies to every request.
+	httphandler.RegisterHumaRoutes(httpSrv.API(), userSvc, "example-jwt-secret-change-in-production")
 
 	r := httpSrv.Engine()
-
-	// Public routes
-	userHandler.RegisterRoutes(r)
-	r.POST("/api/v1/login", userHandler.Login)
-
-	// Protected routes (JWT required)
-	protected := r.Group("/api/v1")
-	protected.Use(auth.Required(
-		auth.WithConfig(cfg),
-		auth.WithClaims(func() auth.Claims { return &model.UserClaims{} }),
-	))
-	protected.GET("/me", userHandler.GetMe)
 
 	// Demo: publish a stream event endpoint
 	r.POST("/api/v1/demo/stream", func(c *gin.Context) {
