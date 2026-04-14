@@ -22,6 +22,10 @@ var httpToGRPCCode = map[int]codes.Code{
 }
 
 func toGRPCStatus(err error) *status.Status {
+	// Already a gRPC status error — pass through unchanged.
+	if s, ok := status.FromError(err); ok {
+		return s
+	}
 	var ce *errors.CodedError
 	if errors.As(err, &ce) {
 		code, ok := httpToGRPCCode[ce.Code]

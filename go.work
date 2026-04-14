@@ -1,0 +1,13 @@
+go 1.26.2
+
+use .
+use ./example/01-quickstart
+use ./example/02-http-api
+use ./example/03-grpc-service
+use ./example/04-database
+use ./example/05-cache-lock
+use ./example/06-event-stream
+use ./example/07-cron
+use ./example/08-observability
+use ./example/09-resilience
+use ./example/10-notify-storage
