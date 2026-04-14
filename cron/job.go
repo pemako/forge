@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // executeJob wraps a job function with recover, optional timeout, and retry.

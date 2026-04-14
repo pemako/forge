@@ -8,7 +8,7 @@
 // passing a meter explicitly.
 package metric
 
-import "github.com/pemako/mk/core"
+import "github.com/pemako/forge/core"
 
 // options holds the functional configuration for Init.
 type options struct {

@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pemako/mk/cache"
-	"github.com/pemako/mk/circuitbreaker"
-	mkerrors "github.com/pemako/mk/errors"
-	"github.com/pemako/mk/event"
-	"github.com/pemako/mk/httpclient"
-	"github.com/pemako/mk/lock"
-	"github.com/pemako/mk/metric"
+	"github.com/pemako/forge/cache"
+	"github.com/pemako/forge/circuitbreaker"
+	mkerrors "github.com/pemako/forge/errors"
+	"github.com/pemako/forge/event"
+	"github.com/pemako/forge/httpclient"
+	"github.com/pemako/forge/lock"
+	"github.com/pemako/forge/metric"
 
-	"github.com/pemako/mk/example/full/internal/model"
-	"github.com/pemako/mk/example/full/internal/repository"
+	"github.com/pemako/forge/example/full/internal/model"
+	"github.com/pemako/forge/example/full/internal/repository"
 )
 
 var (

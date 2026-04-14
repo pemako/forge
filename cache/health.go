@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 type cacheHealthChecker struct {

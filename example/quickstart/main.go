@@ -7,11 +7,11 @@ import (
 	"os"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/pemako/mk/app"
-	"github.com/pemako/mk/config"
-	"github.com/pemako/mk/errors"
-	"github.com/pemako/mk/logger"
-	httpserver "github.com/pemako/mk/server/http"
+	"github.com/pemako/forge/app"
+	"github.com/pemako/forge/config"
+	"github.com/pemako/forge/errors"
+	"github.com/pemako/forge/logger"
+	httpserver "github.com/pemako/forge/server/http"
 )
 
 // --- Input / Output types ---

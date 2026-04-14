@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/errors"
 )
 
 // ErrAlreadyRegistered is returned by Register when a connection with the given

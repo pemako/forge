@@ -10,7 +10,7 @@ package logger
 import (
 	"io"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // options holds the functional configuration for New.

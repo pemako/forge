@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pemako/mk/auth"
+	"github.com/pemako/forge/auth"
 )
 
 type testClaims struct {

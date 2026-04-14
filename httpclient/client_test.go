@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pemako/mk/httpclient"
+	"github.com/pemako/forge/httpclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

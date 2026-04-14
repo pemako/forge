@@ -1,4 +1,4 @@
-module github.com/pemako/mk/example/full
+module github.com/pemako/forge/example/full
 
 go 1.26
 
@@ -6,7 +6,7 @@ require (
 	github.com/danielgtaylor/huma/v2 v2.37.3
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/pemako/mk v0.0.0
+	github.com/pemako/forge v0.0.0
 	go.opentelemetry.io/otel v1.43.0
 	gorm.io/gorm v1.31.1
 )
@@ -136,4 +136,4 @@ require (
 	gorm.io/driver/sqlite v1.6.0 // indirect
 )
 
-replace github.com/pemako/mk => ../../
+replace github.com/pemako/forge => ../../

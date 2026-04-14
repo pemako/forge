@@ -24,8 +24,8 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/errors"
 )
 
 // Response holds the raw HTTP response returned by Do.

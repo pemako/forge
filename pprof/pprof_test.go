@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pemako/mk/pprof"
-	"github.com/pemako/mk/testutil"
+	"github.com/pemako/forge/pprof"
+	"github.com/pemako/forge/testutil"
 )
 
 // freePort returns a random available TCP port on localhost.

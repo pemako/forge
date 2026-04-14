@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	httpserver "github.com/pemako/mk/server/http"
+	httpserver "github.com/pemako/forge/server/http"
 )
 
 func TestHTTPServer_healthEndpoints(t *testing.T) {

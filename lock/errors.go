@@ -16,7 +16,7 @@
 //	}
 package lock
 
-import mkerrors "github.com/pemako/mk/errors"
+import mkerrors "github.com/pemako/forge/errors"
 
 // ErrLockNotAcquired is returned by TryLock when the lock key is already held
 // by another caller and no WithWait option was supplied (or the wait timed out).

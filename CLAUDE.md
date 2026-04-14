@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Module
 
-`github.com/pemako/mk` — Go 1.26 internal component library.
+`github.com/pemako/forge` — Go 1.26 internal component library.
 
 ## Commands
 

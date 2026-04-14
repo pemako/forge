@@ -1,4 +1,4 @@
-module github.com/pemako/mk
+module github.com/pemako/forge
 
 go 1.26
 

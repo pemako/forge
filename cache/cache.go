@@ -21,8 +21,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	mkerrors "github.com/pemako/mk/errors"
-	"github.com/pemako/mk/logger"
+	mkerrors "github.com/pemako/forge/errors"
+	"github.com/pemako/forge/logger"
 )
 
 // ErrCacheMiss is returned when a key does not exist or has expired.

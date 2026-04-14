@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"

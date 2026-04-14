@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/pemako/mk/core"
-	mkerrors "github.com/pemako/mk/errors"
+	"github.com/pemako/forge/core"
+	mkerrors "github.com/pemako/forge/errors"
 )
 
 type contextKey struct{}

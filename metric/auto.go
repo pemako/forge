@@ -8,8 +8,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 
-	mwgrpc "github.com/pemako/mk/middleware/grpc"
-	mwhttp "github.com/pemako/mk/middleware/http"
+	mwgrpc "github.com/pemako/forge/middleware/grpc"
+	mwhttp "github.com/pemako/forge/middleware/http"
 )
 
 var (

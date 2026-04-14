@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pemako/mk/circuitbreaker"
+	"github.com/pemako/forge/circuitbreaker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

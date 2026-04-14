@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	mkErrors "github.com/pemako/mk/errors"
-	grpcMW "github.com/pemako/mk/middleware/grpc"
+	mkErrors "github.com/pemako/forge/errors"
+	grpcMW "github.com/pemako/forge/middleware/grpc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"

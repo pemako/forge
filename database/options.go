@@ -3,7 +3,7 @@ package database
 import (
 	"time"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 type driverEntry struct {

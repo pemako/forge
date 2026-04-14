@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	grpc_health "google.golang.org/grpc/health/grpc_health_v1"
 
-	grpcserver "github.com/pemako/mk/server/grpc"
+	grpcserver "github.com/pemako/forge/server/grpc"
 )
 
 func TestGRPCServer_healthCheck(t *testing.T) {

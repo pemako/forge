@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/logger"
+	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/logger"
 )
 
 // Logger returns a Gin middleware that logs each completed request at INFO level.

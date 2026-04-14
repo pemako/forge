@@ -9,8 +9,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/pemako/mk/ratelimit"
-	"github.com/pemako/mk/testutil"
+	"github.com/pemako/forge/ratelimit"
+	"github.com/pemako/forge/testutil"
 )
 
 func TestInProcess_allow(t *testing.T) {

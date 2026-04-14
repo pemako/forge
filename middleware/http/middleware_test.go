@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/pemako/mk/errors"
-	mw "github.com/pemako/mk/middleware/http"
+	"github.com/pemako/forge/errors"
+	mw "github.com/pemako/forge/middleware/http"
 )
 
 func newTestRouter(handlers ...gin.HandlerFunc) *gin.Engine {

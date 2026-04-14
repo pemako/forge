@@ -9,7 +9,7 @@
 // returned *grpcServer to app.WithServer.
 package grpcserver
 
-import "github.com/pemako/mk/core"
+import "github.com/pemako/forge/core"
 
 // options holds the functional configuration for New.
 type options struct {

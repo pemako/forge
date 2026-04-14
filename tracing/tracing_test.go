@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pemako/mk/config"
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/tracing"
+	"github.com/pemako/forge/config"
+	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/tracing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"

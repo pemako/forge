@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pemako/mk/database"
+	"github.com/pemako/forge/database"
 	"github.com/stretchr/testify/require"
 )
 

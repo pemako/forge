@@ -7,9 +7,9 @@ import (
 
 	"github.com/bwmarrin/snowflake"
 
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/errors"
-	"github.com/pemako/mk/logger"
+	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/errors"
+	"github.com/pemako/forge/logger"
 )
 
 // options holds functional configuration for a Generator.

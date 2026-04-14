@@ -7,13 +7,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/pemako/mk/auth"
-	mkerrors "github.com/pemako/mk/errors"
-	"github.com/pemako/mk/pagination"
-	"github.com/pemako/mk/validate"
+	"github.com/pemako/forge/auth"
+	mkerrors "github.com/pemako/forge/errors"
+	"github.com/pemako/forge/pagination"
+	"github.com/pemako/forge/validate"
 
-	"github.com/pemako/mk/example/full/internal/model"
-	"github.com/pemako/mk/example/full/internal/service"
+	"github.com/pemako/forge/example/full/internal/model"
+	"github.com/pemako/forge/example/full/internal/service"
 )
 
 // UserHandler exposes HTTP endpoints for the user domain.

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pemako/mk/storage"
+	"github.com/pemako/forge/storage"
 )
 
 func TestNew_unknownProvider(t *testing.T) {

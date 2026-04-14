@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/errors"
 )
 
 // IPFilterConfig configures the IP allowlist/blocklist middleware.

@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/testutil"
+	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/testutil"
 )
 
 // TestFreePort verifies the returned address is a valid, connectable TCP address.

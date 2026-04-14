@@ -33,7 +33,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 
-	mkerrors "github.com/pemako/mk/errors"
+	mkerrors "github.com/pemako/forge/errors"
 )
 
 var (

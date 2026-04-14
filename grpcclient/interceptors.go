@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // shouldRetryCode reports whether the gRPC status code warrants a retry.

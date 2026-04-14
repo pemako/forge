@@ -3,7 +3,7 @@ package grpcMiddleware
 import (
 	"context"
 
-	"github.com/pemako/mk/ratelimit"
+	"github.com/pemako/forge/ratelimit"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"

@@ -36,7 +36,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // Migrator is the interface app accepts for running database migrations before

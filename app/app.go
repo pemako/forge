@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // App is the application lifecycle manager. Create one with New, then call Run.

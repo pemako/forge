@@ -238,7 +238,7 @@ New file documenting package layers, dependency direction, global vs instance pr
 - `example/quickstart/` — minimal HTTP service; random port via `net.Listen(":0")`; no external dependencies; demonstrates config, logger, gin routes, and graceful shutdown
 - `example/full/` — comprehensive service using all packages with instance-first APIs and `app.WithLifecycle`/`app.WithCloser`
 
-Both are separate Go modules with `replace github.com/pemako/mk => ../../`.
+Both are separate Go modules with `replace github.com/pemako/forge => ../../`.
 
 #### `Makefile` — updated example targets
 
@@ -302,7 +302,7 @@ Both are separate Go modules with `replace github.com/pemako/mk => ../../`.
 
 ---
 
-[Unreleased]: https://github.com/pemako/mk/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/pemako/mk/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/pemako/mk/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/pemako/mk/releases/tag/v0.1.0
+[Unreleased]: https://github.com/pemako/forge/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pemako/forge/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/pemako/forge/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/pemako/forge/releases/tag/v0.1.0

@@ -23,7 +23,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/errors"
 )
 
 // Manager holds all database connections created by New and satisfies the

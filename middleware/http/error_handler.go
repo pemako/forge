@@ -2,7 +2,7 @@ package httpMiddleware
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/errors"
 )
 
 // ErrorHandler translates gin.Context errors to JSON responses.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pemako/mk/cache"
+	"github.com/pemako/forge/cache"
 	"github.com/stretchr/testify/require"
 )
 

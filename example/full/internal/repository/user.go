@@ -3,10 +3,10 @@ package repository
 import (
 	"context"
 
-	"github.com/pemako/mk/database"
+	"github.com/pemako/forge/database"
 	"gorm.io/gorm"
 
-	"github.com/pemako/mk/example/full/internal/model"
+	"github.com/pemako/forge/example/full/internal/model"
 )
 
 type UserRepo struct{}

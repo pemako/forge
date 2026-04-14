@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/errors"
 )
 
 // Recovery returns a Gin middleware that catches panics and responds with

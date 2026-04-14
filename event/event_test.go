@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pemako/mk/event"
+	"github.com/pemako/forge/event"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

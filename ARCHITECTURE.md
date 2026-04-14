@@ -1,8 +1,8 @@
-# mk Architecture Guide
+# Forge Architecture Guide
 
 ## 1. Project Scope
 
-`mk` is an **instance-first** Go service framework for building production-grade HTTP and gRPC services. It solves recurring cross-cutting concerns — lifecycle management, configuration, logging, distributed tracing, metrics, HTTP/gRPC servers, database, cache, messaging — through a cohesive, composable package set with a common interface layer.
+`forge` is an **instance-first** Go service framework for building production-grade HTTP and gRPC services. It solves recurring cross-cutting concerns — lifecycle management, configuration, logging, distributed tracing, metrics, HTTP/gRPC servers, database, cache, messaging — through a cohesive, composable package set with a common interface layer.
 
 ## 2. Package Layers and Dependency Direction
 

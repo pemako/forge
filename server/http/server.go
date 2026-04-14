@@ -10,8 +10,8 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humagin"
 	"github.com/gin-gonic/gin"
 
-	"github.com/pemako/mk/core"
-	mw "github.com/pemako/mk/middleware/http"
+	"github.com/pemako/forge/core"
+	mw "github.com/pemako/forge/middleware/http"
 )
 
 type ginServer struct {

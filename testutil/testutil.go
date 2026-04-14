@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // FreePort allocates a random available TCP port on localhost, releases it

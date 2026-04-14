@@ -3,7 +3,7 @@ package grpcMiddleware
 import (
 	"context"
 
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

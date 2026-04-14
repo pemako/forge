@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/logger"
+	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/logger"
 	"google.golang.org/grpc"
 )
 

@@ -1,6 +1,6 @@
 package cache
 
-import "github.com/pemako/mk/core"
+import "github.com/pemako/forge/core"
 
 type backendEntry struct {
 	name     string

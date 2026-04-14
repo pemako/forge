@@ -40,7 +40,7 @@ import (
 	netpprof "net/http/pprof"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // Server is a standalone HTTP server that exposes pprof endpoints.

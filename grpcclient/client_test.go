@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pemako/mk/grpcclient"
+	"github.com/pemako/forge/grpcclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"

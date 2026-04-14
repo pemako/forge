@@ -1,6 +1,8 @@
-# mk
+# Forge
 
-An internal Go component library for building production-grade HTTP and gRPC services. `mk` provides a cohesive set of packages — config, logger, tracing, metrics, database, cache, servers, and middleware — all wired together through a common interface layer and a lifecycle-managing `app` runner.
+Forge is a Go toolkit for building production-grade backend services with batteries-included infrastructure components and consistent engineering conventions.
+
+`forge` provides a cohesive set of packages — config, logger, tracing, metrics, database, cache, servers, and middleware — all wired together through a common interface layer and a lifecycle-managing `app` runner.
 
 ## Getting Started
 
@@ -100,7 +102,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design guide.
 ## Installation
 
 ```bash
-go get github.com/pemako/mk
+go get github.com/pemako/forge
 ```
 
 Requires Go 1.26 or later.
@@ -114,13 +116,13 @@ import (
   "context"
   "os"
 
-  "github.com/pemako/mk/app"
-  "github.com/pemako/mk/config"
-  "github.com/pemako/mk/logger"
-  "github.com/pemako/mk/metric"
-  grpcserver "github.com/pemako/mk/server/grpc"
-  httpserver "github.com/pemako/mk/server/http"
-  "github.com/pemako/mk/tracing"
+  "github.com/pemako/forge/app"
+  "github.com/pemako/forge/config"
+  "github.com/pemako/forge/logger"
+  "github.com/pemako/forge/metric"
+  grpcserver "github.com/pemako/forge/server/grpc"
+  httpserver "github.com/pemako/forge/server/http"
+  "github.com/pemako/forge/tracing"
 )
 
 func main() {

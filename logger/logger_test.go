@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pemako/mk/logger"
+	"github.com/pemako/forge/logger"
 )
 
 func TestLogger_outputsJSON(t *testing.T) {

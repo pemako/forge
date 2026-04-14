@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // ReadyCheckFunc is a custom readiness check function.

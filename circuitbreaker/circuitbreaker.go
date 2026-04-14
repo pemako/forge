@@ -40,7 +40,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 // ErrOpen is returned by Execute when the circuit is open and the request was

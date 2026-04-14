@@ -35,7 +35,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 

@@ -7,11 +7,11 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/golang-jwt/jwt/v5"
-	mkerrors "github.com/pemako/mk/errors"
-	"github.com/pemako/mk/pagination"
+	mkerrors "github.com/pemako/forge/errors"
+	"github.com/pemako/forge/pagination"
 
-	"github.com/pemako/mk/example/full/internal/model"
-	"github.com/pemako/mk/example/full/internal/service"
+	"github.com/pemako/forge/example/full/internal/model"
+	"github.com/pemako/forge/example/full/internal/service"
 )
 
 // RegisterHumaRoutes registers all user-domain routes on the Huma API.

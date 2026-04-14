@@ -1,6 +1,6 @@
 package notify
 
-import "github.com/pemako/mk/core"
+import "github.com/pemako/forge/core"
 
 // EmailConfig holds the SMTP connection settings for the Email channel.
 // Port 465 uses implicit TLS (SMTPS); port 587 uses STARTTLS.

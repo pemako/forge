@@ -8,7 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 )
 
 type redisCache struct {

@@ -10,7 +10,7 @@ import (
 	grpc_health "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
-	grpcMW "github.com/pemako/mk/middleware/grpc"
+	grpcMW "github.com/pemako/forge/middleware/grpc"
 )
 
 type grpcServer struct {

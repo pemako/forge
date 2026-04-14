@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/errors"
 )
 
 func TestDefine(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/pemako/mk/cron"
-	"github.com/pemako/mk/lock"
+	"github.com/pemako/forge/cron"
+	"github.com/pemako/forge/lock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

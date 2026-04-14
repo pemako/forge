@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pemako/mk/errors"
-	"github.com/pemako/mk/ratelimit"
+	"github.com/pemako/forge/errors"
+	"github.com/pemako/forge/ratelimit"
 )
 
 // RateLimitConfig configures the token-bucket rate limiter middleware.

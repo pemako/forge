@@ -20,8 +20,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/logger"
+	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/logger"
 )
 
 // Claims is the interface that business-defined JWT claims structs must satisfy.

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pemako/mk/notify"
+	"github.com/pemako/forge/notify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pemako/mk/core"
+	"github.com/pemako/forge/core"
 	"github.com/redis/go-redis/v9"
 )
 

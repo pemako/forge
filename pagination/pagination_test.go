@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/pemako/mk/pagination"
+	"github.com/pemako/forge/pagination"
 )
 
 func TestFromParams_defaults(t *testing.T) {

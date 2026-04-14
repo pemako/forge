@@ -1,10 +1,10 @@
-module github.com/pemako/mk/example/quickstart
+module github.com/pemako/forge/example/quickstart
 
 go 1.26
 
 require (
 	github.com/danielgtaylor/huma/v2 v2.37.3
-	github.com/pemako/mk v0.0.0
+	github.com/pemako/forge v0.0.0
 )
 
 require (
@@ -66,4 +66,4 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )
 
-replace github.com/pemako/mk => ../../
+replace github.com/pemako/forge => ../../

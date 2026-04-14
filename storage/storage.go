@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pemako/mk/core"
-	"github.com/pemako/mk/errors"
+	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/errors"
 )
 
 // Storage is the interface implemented by all object storage backends.

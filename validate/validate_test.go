@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	mkerrors "github.com/pemako/mk/errors"
-	"github.com/pemako/mk/validate"
+	mkerrors "github.com/pemako/forge/errors"
+	"github.com/pemako/forge/validate"
 )
 
 type createReq struct {

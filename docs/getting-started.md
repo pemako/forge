@@ -22,11 +22,11 @@ import (
   "os"
 
   "github.com/gin-gonic/gin"
-  "github.com/pemako/mk/app"
-  "github.com/pemako/mk/config"
-  "github.com/pemako/mk/errors"
-  "github.com/pemako/mk/logger"
-  httpserver "github.com/pemako/mk/server/http"
+  "github.com/pemako/forge/app"
+  "github.com/pemako/forge/config"
+  "github.com/pemako/forge/errors"
+  "github.com/pemako/forge/logger"
+  httpserver "github.com/pemako/forge/server/http"
 )
 
 func main() {
@@ -78,12 +78,12 @@ import (
   "context"
   "os"
 
-  "github.com/pemako/mk/app"
-  "github.com/pemako/mk/cache"
-  "github.com/pemako/mk/config"
-  "github.com/pemako/mk/database"
-  "github.com/pemako/mk/logger"
-  httpserver "github.com/pemako/mk/server/http"
+  "github.com/pemako/forge/app"
+  "github.com/pemako/forge/cache"
+  "github.com/pemako/forge/config"
+  "github.com/pemako/forge/database"
+  "github.com/pemako/forge/logger"
+  httpserver "github.com/pemako/forge/server/http"
 )
 
 func main() {
@@ -166,10 +166,10 @@ import (
   "os"
   "time"
 
-  "github.com/pemako/mk/app"
-  "github.com/pemako/mk/config"
-  "github.com/pemako/mk/cron"
-  "github.com/pemako/mk/logger"
+  "github.com/pemako/forge/app"
+  "github.com/pemako/forge/config"
+  "github.com/pemako/forge/cron"
+  "github.com/pemako/forge/logger"
 )
 
 func main() {
@@ -200,11 +200,11 @@ import (
   "context"
   "os"
 
-  "github.com/pemako/mk/app"
-  "github.com/pemako/mk/cache"
-  "github.com/pemako/mk/config"
-  "github.com/pemako/mk/logger"
-  "github.com/pemako/mk/stream"
+  "github.com/pemako/forge/app"
+  "github.com/pemako/forge/cache"
+  "github.com/pemako/forge/config"
+  "github.com/pemako/forge/logger"
+  "github.com/pemako/forge/stream"
 )
 
 func main() {
