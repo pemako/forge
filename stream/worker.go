@@ -11,6 +11,7 @@ import (
 	"github.com/pemako/mk/core"
 	"github.com/redis/go-redis/v9"
 )
+
 type streamWorker struct {
 	bus  *Bus
 	done chan struct{}

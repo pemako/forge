@@ -201,8 +201,8 @@ func WithNoMiddleware() Option {
 //	}, handler)
 func WithOpenAPI(title, version, docsPath string) Option {
 	return func(o *options) {
-		o.openAPITitle   = title
+		o.openAPITitle = title
 		o.openAPIVersion = version
-		o.openAPIPath    = docsPath
+		o.openAPIPath = docsPath
 	}
 }

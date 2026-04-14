@@ -60,8 +60,8 @@ func New(opts ...Option) (*Provider, error) {
 	}
 
 	res, _ := resource.New(ctx,
-		resource.WithHost(),      // host.name — auto-detected hostname
-		resource.WithProcess(),   // process.pid, process.executable.name
+		resource.WithHost(),    // host.name — auto-detected hostname
+		resource.WithProcess(), // process.pid, process.executable.name
 		resource.WithAttributes(
 			semconv.ServiceName(o.serviceName),
 		),
