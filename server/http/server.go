@@ -101,6 +101,12 @@ func New(opts ...Option) (*ginServer, error) {
 	if o.openAPITitle != "" {
 		humaConfig := huma.DefaultConfig(o.openAPITitle, o.openAPIVersion)
 		humaConfig.DocsPath = o.openAPIPath
+		// DefaultConfig registers a SchemaLinkTransformer via CreateHooks that
+		// injects a "$schema" field into every response body. This clutters API
+		// responses with internal schema URLs that callers don't need.
+		// Clear CreateHooks to disable this transformer; the OpenAPI spec and
+		// the /schemas endpoint are still generated and served normally.
+		humaConfig.CreateHooks = nil
 		s.api = humagin.New(r, humaConfig)
 	}
 
