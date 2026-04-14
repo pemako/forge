@@ -29,6 +29,29 @@ import (
 var ErrCacheMiss = errors.New("cache miss")
 
 // Cache is the common interface for all cache backends.
+//
+// # Portable operations
+//
+// Get, Set (with TTL), Del, and Exists are supported by all backends.
+// Code using only these methods can switch between memory and Redis without
+// change.
+//
+// # TTL precision
+//
+// TTL enforcement precision differs by backend:
+//   - Redis: exact expiry, enforced server-side to the millisecond.
+//   - Memory (go-cache): keys are lazily evicted during a background sweep
+//     (interval set at construction). A key with TTL=1s may survive up to
+//     sweep-interval longer. Do not rely on sub-second or exact TTL semantics
+//     with the memory backend.
+//
+// A zero TTL means no expiry on both backends.
+//
+// # Non-portable operations
+//
+// Redis-specific operations (atomic increments, pub/sub, streams, Lua scripts,
+// sorted sets) have no equivalent in the memory backend. Access them via
+// cache.RedisClient("name") rather than the Cache interface.
 type Cache interface {
 	// Get retrieves the string value for key.
 	// Returns ErrCacheMiss if the key does not exist or has expired.

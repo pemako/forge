@@ -417,3 +417,78 @@ app.WithBeforeStart(func(ctx context.Context) error {
 ```
 
 `core.HealthChecker` is defined in `core/` to avoid import cycles — infrastructure packages implement it without importing `server/http` or `app`.
+
+## 13. Multi-backend Abstraction Semantics
+
+Several packages in mk expose a single interface over multiple backends (`cache`, `ratelimit`, `storage`, `notify`). This pattern provides a convenient unified API but carries a risk: the interface hides semantic differences that affect correctness, not just performance. **Switching backends is not always a drop-in change.**
+
+### Semantic layers
+
+Every multi-backend package should be understood at three levels:
+
+| Layer | Meaning |
+|-------|---------|
+| **Portable minimum** | Operations guaranteed to behave identically across all backends |
+| **Backend-specific** | Operations available on one backend but absent or broken on others |
+| **Non-interchangeable semantics** | Operations with the same signature but materially different observable behaviour |
+
+The third layer is the most dangerous. Silent behavioural changes after a backend switch can be very hard to diagnose.
+
+### `ratelimit`: scope is not portable
+
+This is the highest-risk package. The two backends share the `Limiter` interface but enforce limits with fundamentally different scopes:
+
+| Property | In-process (token-bucket) | Redis (fixed-window) |
+|----------|--------------------------|----------------------|
+| Enforcement scope | Per process instance | Cluster-wide |
+| Algorithm | Token bucket (smooth) | Fixed window (bursty at boundary) |
+| Multi-instance behaviour | Each instance has independent quota | All instances share one counter |
+| Redis failure | N/A | Fails open (allows the request) |
+
+**Consequence:** A service running 4 replicas with in-process rate limiting allows 4× more requests than intended. Switching to Redis in production resets all in-flight counters.
+
+### `cache`: TTL precision is not portable
+
+| Property | Memory (go-cache) | Redis |
+|----------|------------------|-------|
+| TTL enforcement | Lazy sweep (background goroutine) | Exact, server-side |
+| Sub-second TTL reliability | No — keys may survive past TTL until sweep fires | Yes |
+| Zero TTL | No expiry | No expiry |
+| Redis-specific ops (INCR, EXPIRE, Lua) | Not available | Use `cache.RedisClient("name")` |
+
+**Consequence:** Code relying on TTL=1s for short-lived tokens (e.g., rate limit windows, OTP expiry) behaves incorrectly with the memory backend. Use Redis in production for any TTL-sensitive logic.
+
+### `storage`: capability surface is not uniform
+
+S3, OSS, and COS expose different metadata fields, ACL models, and server-side encryption options. The `Storage` interface exposes the lowest common denominator (`Put`, `Get`, `Delete`, `URL`).
+
+| Operation | S3 | Alibaba OSS | Tencent COS |
+|-----------|----|-------------|-------------|
+| ContentType on Put | ✓ | ✓ | ✓ |
+| ACL on Put | ✓ | ✓ (different enum) | ✓ (different enum) |
+| Server-side encryption | ✓ | ✓ | ✓ |
+| Bucket lifecycle rules | ✓ | ✓ | ✓ |
+
+The interface contract only guarantees `Put`/`Get`/`Delete`/`URL`. For provider-specific features, access the underlying SDK client directly; do not add them to the `Storage` interface.
+
+### `notify`: delivery semantics vary by channel
+
+All channels share `Send(ctx, Message) error`. A nil return means the API accepted the message, **not** that it was delivered:
+
+| Channel | What nil error means |
+|---------|---------------------|
+| Email (SMTP) | SMTP server accepted for relay; not guaranteed to reach inbox |
+| SMS (Aliyun) | API returned code "OK"; carrier delivery is async |
+| DingTalk / WeCom / Feishu | Webhook returned HTTP 200; platform delivery is async |
+
+`Send` stops on the first channel error and does not retry. For delivery guarantees, wrap `Send` in your own retry loop or use a message queue.
+
+### Guidance for new multi-backend packages
+
+When adding a new package with multiple backends:
+
+1. **Document the portable minimum** in the interface godoc.
+2. **Call out non-interchangeable semantics** explicitly — do not leave them to be discovered by the caller.
+3. **Never add backend-specific methods to the shared interface** — keep the interface at the lowest common denominator and expose backend-specific features via type assertion or a separate constructor.
+4. **Test with both backends** — the presence of tests for both backends is the best defence against unintentional semantic drift.
+

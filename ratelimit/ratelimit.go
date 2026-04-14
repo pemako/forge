@@ -10,6 +10,24 @@
 //     All instances share the same counters, so limits are enforced cluster-wide.
 //     Requires a *redis.Client, typically obtained from cache.RedisClient.
 //
+// # Portability warning: backends are NOT semantically interchangeable
+//
+// Switching backends is not a configuration-only change — it changes observable
+// behaviour for callers:
+//
+//	Dimension            In-process (token-bucket)     Redis (fixed-window)
+//	─────────────────────────────────────────────────────────────────────────
+//	Scope                Per process instance          Cluster-wide (shared)
+//	Algorithm            Token bucket (smooth)         Fixed window (bursty)
+//	Burst handling       Configurable burst size       None; hard limit per window
+//	Redis failure        N/A                           Fails open (allows request)
+//	Memory growth        Unbounded key map             Keys expire with window TTL
+//
+// Use in-process for single-instance deployments or development.
+// Use Redis for any multi-instance deployment where per-user or per-IP limits
+// must be enforced cluster-wide. Switching from in-process to Redis in a
+// running system will reset all in-flight counters.
+//
 // Example (in-process):
 //
 //	lim := ratelimit.New(ratelimit.WithRate(100), ratelimit.WithBurst(10))
@@ -37,9 +55,16 @@ import (
 
 // Limiter enforces a rate limit per string key.
 // All implementations are safe for concurrent use.
+//
+// The Allow method is the only guaranteed portable operation across backends.
+// Backend selection changes the enforcement scope (per-instance vs cluster-wide)
+// and the algorithm (token-bucket vs fixed-window). See package doc for details.
 type Limiter interface {
 	// Allow reports whether one event for the given key is permitted right now.
 	// Returns false if the rate limit has been exceeded.
+	//
+	// On Redis failure the distributed backend fails open (returns true) to
+	// avoid cascading failures. The in-process backend never fails.
 	Allow(ctx context.Context, key string) bool
 }
 
