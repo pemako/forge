@@ -17,43 +17,43 @@ For architecture decisions see [ARCHITECTURE.md](../ARCHITECTURE.md).
 package main
 
 import (
-    "context"
-    "net/http"
-    "os"
+  "context"
+  "net/http"
+  "os"
 
-    "github.com/gin-gonic/gin"
-    "github.com/pemako/mk/app"
-    "github.com/pemako/mk/config"
-    "github.com/pemako/mk/errors"
-    "github.com/pemako/mk/logger"
-    httpserver "github.com/pemako/mk/server/http"
+  "github.com/gin-gonic/gin"
+  "github.com/pemako/mk/app"
+  "github.com/pemako/mk/config"
+  "github.com/pemako/mk/errors"
+  "github.com/pemako/mk/logger"
+  httpserver "github.com/pemako/mk/server/http"
 )
 
 func main() {
-    cfg, _ := config.Load()
-    log, _ := logger.New(logger.WithConfig(cfg))
+  cfg, _ := config.Load()
+  log, _ := logger.New(logger.WithConfig(cfg))
 
-    srv, _ := httpserver.New(
-        httpserver.WithConfig(cfg),
-        httpserver.WithLogger(log),
-        httpserver.WithServiceName("my-service"),
-    )
+  srv, _ := httpserver.New(
+    httpserver.WithConfig(cfg),
+    httpserver.WithLogger(log),
+    httpserver.WithServiceName("my-service"),
+  )
 
-    srv.Engine().GET("/users/:id", getUser)
+  srv.Engine().GET("/users/:id", getUser)
 
-    if err := app.New(app.WithServer(srv)).Run(); err != nil {
-        log.Error(context.Background(), "run failed", logger.F("err", err))
-        os.Exit(1)
-    }
+  if err := app.New(app.WithServer(srv)).Run(); err != nil {
+    log.Error(context.Background(), "run failed", logger.F("err", err))
+    os.Exit(1)
+  }
 }
 
 func getUser(c *gin.Context) {
-    id := c.Param("id")
-    if id == "" {
-        c.Error(errors.Wrap(errors.ErrBadRequest, "id is required"))
-        return
-    }
-    c.JSON(http.StatusOK, gin.H{"id": id})
+  id := c.Param("id")
+  if id == "" {
+    c.Error(errors.Wrap(errors.ErrBadRequest, "id is required"))
+    return
+  }
+  c.JSON(http.StatusOK, gin.H{"id": id})
 }
 ```
 
@@ -75,50 +75,50 @@ func getUser(c *gin.Context) {
 package main
 
 import (
-    "context"
-    "os"
+  "context"
+  "os"
 
-    "github.com/pemako/mk/app"
-    "github.com/pemako/mk/cache"
-    "github.com/pemako/mk/config"
-    "github.com/pemako/mk/database"
-    "github.com/pemako/mk/logger"
-    httpserver "github.com/pemako/mk/server/http"
+  "github.com/pemako/mk/app"
+  "github.com/pemako/mk/cache"
+  "github.com/pemako/mk/config"
+  "github.com/pemako/mk/database"
+  "github.com/pemako/mk/logger"
+  httpserver "github.com/pemako/mk/server/http"
 )
 
 func main() {
-    cfg, _ := config.Load()
-    log, _ := logger.New(logger.WithConfig(cfg))
+  cfg, _ := config.Load()
+  log, _ := logger.New(logger.WithConfig(cfg))
 
-    // Database — *Manager implements app.Migrator (runs goose migrations at startup).
-    dbMgr, _ := database.New(database.WithConfig(cfg))
-    database.Register("default", dbMgr)
+  // Database — *Manager implements app.Migrator (runs goose migrations at startup).
+  dbMgr, _ := database.New(database.WithConfig(cfg))
+  database.Register("default", dbMgr)
 
-    // Cache — Manager implements app.Closer (released on shutdown).
-    cacheMgr, _ := cache.New(cache.WithConfig(cfg))
-    cache.Register("default", cacheMgr)
+  // Cache — Manager implements app.Closer (released on shutdown).
+  cacheMgr, _ := cache.New(cache.WithConfig(cfg))
+  cache.Register("default", cacheMgr)
 
-    srv, _ := httpserver.New(
-        httpserver.WithConfig(cfg),
-        httpserver.WithLogger(log),
-        // Wire health checks so /readyz reflects real dependency status.
-        httpserver.WithHealthChecks(
-            dbMgr.HealthChecker("default"),
-            cacheMgr.HealthChecker("redis"),
-        ),
-    )
+  srv, _ := httpserver.New(
+    httpserver.WithConfig(cfg),
+    httpserver.WithLogger(log),
+    // Wire health checks so /readyz reflects real dependency status.
+    httpserver.WithHealthChecks(
+      dbMgr.HealthChecker("default"),
+      cacheMgr.HealthChecker("redis"),
+    ),
+  )
 
-    // Register routes — use database.DB("main") and cache.Client("default") in handlers.
-    registerRoutes(srv.Engine())
+  // Register routes — use database.DB("main") and cache.Client("default") in handlers.
+  registerRoutes(srv.Engine())
 
-    if err := app.New(
-        app.WithMigration(dbMgr),   // runs migrations before servers start
-        app.WithServer(srv),
-        app.WithCloser(cacheMgr),   // closes Redis pool on shutdown
-    ).Run(); err != nil {
-        log.Error(context.Background(), "run failed", logger.F("err", err))
-        os.Exit(1)
-    }
+  if err := app.New(
+    app.WithMigration(dbMgr),  // runs migrations before servers start
+    app.WithServer(srv),
+    app.WithCloser(cacheMgr),  // closes Redis pool on shutdown
+  ).Run(); err != nil {
+    log.Error(context.Background(), "run failed", logger.F("err", err))
+    os.Exit(1)
+  }
 }
 ```
 
@@ -133,7 +133,7 @@ database:
 
 cache:
   default:
-    backend: memory       # in-process (dev/test)
+    backend: memory      # in-process (dev/test)
   redis:
     backend: redis
     addr: "localhost:6379"
@@ -162,32 +162,32 @@ cache:
 package main
 
 import (
-    "context"
-    "os"
-    "time"
+  "context"
+  "os"
+  "time"
 
-    "github.com/pemako/mk/app"
-    "github.com/pemako/mk/config"
-    "github.com/pemako/mk/cron"
-    "github.com/pemako/mk/logger"
+  "github.com/pemako/mk/app"
+  "github.com/pemako/mk/config"
+  "github.com/pemako/mk/cron"
+  "github.com/pemako/mk/logger"
 )
 
 func main() {
-    cfg, _ := config.Load()
-    log, _ := logger.New(logger.WithConfig(cfg))
+  cfg, _ := config.Load()
+  log, _ := logger.New(logger.WithConfig(cfg))
 
-    scheduler := cron.New(cron.WithLogger(log))
+  scheduler := cron.New(cron.WithLogger(log))
 
-    scheduler.Add("@every 1m", func(ctx context.Context) error {
-        log.Info(ctx, "tick")
-        return nil
-    }, cron.WithTimeout(30*time.Second))
+  scheduler.Add("@every 1m", func(ctx context.Context) error {
+    log.Info(ctx, "tick")
+    return nil
+  }, cron.WithTimeout(30*time.Second))
 
-    // cron.Scheduler implements core.Server — Start blocks, Stop drains.
-    if err := app.New(app.WithServer(scheduler)).Run(); err != nil {
-        log.Error(context.Background(), "run failed", logger.F("err", err))
-        os.Exit(1)
-    }
+  // cron.Scheduler implements core.Server — Start blocks, Stop drains.
+  if err := app.New(app.WithServer(scheduler)).Run(); err != nil {
+    log.Error(context.Background(), "run failed", logger.F("err", err))
+    os.Exit(1)
+  }
 }
 ```
 
@@ -197,41 +197,41 @@ func main() {
 package main
 
 import (
-    "context"
-    "os"
+  "context"
+  "os"
 
-    "github.com/pemako/mk/app"
-    "github.com/pemako/mk/cache"
-    "github.com/pemako/mk/config"
-    "github.com/pemako/mk/logger"
-    "github.com/pemako/mk/stream"
+  "github.com/pemako/mk/app"
+  "github.com/pemako/mk/cache"
+  "github.com/pemako/mk/config"
+  "github.com/pemako/mk/logger"
+  "github.com/pemako/mk/stream"
 )
 
 func main() {
-    cfg, _ := config.Load()
-    log, _ := logger.New(logger.WithConfig(cfg))
+  cfg, _ := config.Load()
+  log, _ := logger.New(logger.WithConfig(cfg))
 
-    cacheMgr, _ := cache.New(cache.WithConfig(cfg))
-    cache.Register("default", cacheMgr)
+  cacheMgr, _ := cache.New(cache.WithConfig(cfg))
+  cache.Register("default", cacheMgr)
 
-    bus, _ := stream.New(cache.RedisClient("redis"))
+  bus, _ := stream.New(cache.RedisClient("redis"))
 
-    bus.Subscribe("orders",
-        stream.WithGroup("order-processor"),
-        stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
-            log.Info(ctx, "received order", logger.F("id", msg.ID))
-            return nil
-        }),
-    )
+  bus.Subscribe("orders",
+    stream.WithGroup("order-processor"),
+    stream.WithHandler(func(ctx context.Context, msg stream.Message) error {
+      log.Info(ctx, "received order", logger.F("id", msg.ID))
+      return nil
+    }),
+  )
 
-    // bus.Worker() implements core.Server.
-    if err := app.New(
-        app.WithServer(bus.Worker()),
-        app.WithCloser(cacheMgr),
-    ).Run(); err != nil {
-        log.Error(context.Background(), "run failed", logger.F("err", err))
-        os.Exit(1)
-    }
+  // bus.Worker() implements core.Server.
+  if err := app.New(
+    app.WithServer(bus.Worker()),
+    app.WithCloser(cacheMgr),
+  ).Run(); err != nil {
+    log.Error(context.Background(), "run failed", logger.F("err", err))
+    os.Exit(1)
+  }
 }
 ```
 
@@ -242,8 +242,8 @@ srv, _ := httpserver.New(httpserver.WithAddr(":8081"), httpserver.WithLogger(log
 // No business routes — only /healthz and /readyz are registered automatically.
 
 app.New(
-    app.WithServer(srv),
-    app.WithServer(scheduler),   // two servers run concurrently
+  app.WithServer(srv),
+  app.WithServer(scheduler),  // two servers run concurrently
 ).Run()
 ```
 
