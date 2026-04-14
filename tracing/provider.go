@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -59,8 +60,27 @@ func New(opts ...Option) (*Provider, error) {
 	}
 
 	res, _ := resource.New(ctx,
-		resource.WithAttributes(semconv.ServiceName(o.serviceName)),
+		resource.WithHost(),      // host.name — auto-detected hostname
+		resource.WithProcess(),   // process.pid, process.executable.name
+		resource.WithAttributes(
+			semconv.ServiceName(o.serviceName),
+		),
 	)
+
+	// Append service.version, deployment.environment, and any user-supplied
+	// extra attributes into a second resource, then merge both.
+	var extraAttrs []attribute.KeyValue
+	if o.serviceVersion != "" {
+		extraAttrs = append(extraAttrs, semconv.ServiceVersion(o.serviceVersion))
+	}
+	if o.environment != "" {
+		extraAttrs = append(extraAttrs, semconv.DeploymentEnvironment(o.environment))
+	}
+	extraAttrs = append(extraAttrs, o.extraAttrs...)
+	if len(extraAttrs) > 0 {
+		extra, _ := resource.New(ctx, resource.WithAttributes(extraAttrs...))
+		res, _ = resource.Merge(res, extra)
+	}
 
 	sdkOpts := []sdktrace.TracerProviderOption{
 		sdktrace.WithResource(res),
