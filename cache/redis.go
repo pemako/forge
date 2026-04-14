@@ -21,6 +21,10 @@ func newRedisCache(name, addr, password string, db int, log core.Logger) (*redis
 		Addr:     addr,
 		Password: password,
 		DB:       db,
+		// Force RESP2 to avoid a go-redis v9 RESP3 compatibility issue where
+		// XREADGROUP BLOCK returns a null type that the RESP3 reader does not
+		// handle correctly, causing the read to hang until the TCP deadline.
+		Protocol: 2,
 	})
 	pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	err := rdb.Ping(pingCtx).Err()
