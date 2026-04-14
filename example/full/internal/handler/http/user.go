@@ -175,7 +175,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 func (h *UserHandler) GetMe(c *gin.Context) {
 	claims, ok := auth.FromContext[*model.UserClaims](c.Request.Context())
 	if !ok {
-		c.Error(mkerrors.ErrUnAuth) //nolint:errcheck
+		c.Error(mkerrors.ErrUnauthorized) //nolint:errcheck
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user_id": claims.UserID, "role": claims.Role})
