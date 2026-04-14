@@ -44,15 +44,14 @@ auth:
   expire: 24h
 
 tracing:
-  endpoint: "localhost:4317"
+  endpoint: "otel-sdk-in.domob-inc.com:14317"
   sampler: 1.0
 
 metric:
   prometheus_addr: :19091
 
-# lock uses cache.redis connection (lock.NewFromConfig reads lock.addr)
-lock:
-  addr: "localhost:6379"
+# lock reuses cache.redis connection — no separate addr needed.
+# Use lock.NewWithClient(cache.RedisClient("redis")) in main.go.
 
 # circuitbreaker per-named thresholds
 circuitbreaker:
