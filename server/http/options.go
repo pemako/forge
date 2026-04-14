@@ -12,6 +12,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pemako/mk/core"
 )
 
@@ -28,14 +29,15 @@ type readyCheck struct {
 
 // options holds the functional configuration for New.
 type options struct {
-	addr           string
-	readTimeout    time.Duration
-	writeTimeout   time.Duration
-	logger         core.Logger
-	serviceName    string
-	serviceVersion string
-	listener       net.Listener
-	readyChecks    []readyCheck
+	addr            string
+	readTimeout     time.Duration
+	writeTimeout    time.Duration
+	logger          core.Logger
+	serviceName     string
+	serviceVersion  string
+	listener        net.Listener
+	readyChecks     []readyCheck
+	middlewareStack []gin.HandlerFunc // nil = use default stack; non-nil = use as-is (may be empty)
 }
 
 // Option is a functional option for configuring the HTTP server.
@@ -133,4 +135,47 @@ func WithConfig(cfg core.Config) Option {
 			o.serviceVersion = v
 		}
 	}
+}
+
+// WithMiddlewareStack completely replaces the built-in default middleware stack
+// with the provided handlers. New() will mount exactly these handlers in the
+// given order — nothing more, nothing less.
+//
+// Three modes:
+//
+//   - Not called: New() mounts the default stack
+//     (RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler).
+//   - Called with handlers: those handlers become the entire middleware stack.
+//   - Called with no handlers (or use WithNoMiddleware): no request middleware
+//     is mounted; health endpoints are still registered.
+//
+// This is NOT an append — it replaces the default stack entirely.
+// To extend the default stack without copying its internals, use
+// DefaultMiddlewareStack:
+//
+//	stack := httpserver.DefaultMiddlewareStack("svc", log)
+//	stack = append(stack, myAuthMiddleware)
+//	srv, _ := httpserver.New(httpserver.WithMiddlewareStack(stack...))
+//
+// WARNING: omitting Recovery() means panics will crash the server process.
+func WithMiddlewareStack(middlewares ...gin.HandlerFunc) Option {
+	return func(o *options) {
+		// Store as non-nil slice so New() can distinguish "explicitly set to empty"
+		// from "never set" (nil). A nil stack means "use default".
+		if middlewares == nil {
+			o.middlewareStack = []gin.HandlerFunc{}
+		} else {
+			o.middlewareStack = middlewares
+		}
+	}
+}
+
+// WithNoMiddleware mounts no request middleware on the server.
+// Health endpoints (/healthz, /readyz, /health) are still registered.
+// This is equivalent to WithMiddlewareStack() with no arguments.
+//
+// WARNING: without Recovery(), panics in route handlers will crash the process.
+// Without ErrorHandler(), c.Error() calls will not produce JSON responses.
+func WithNoMiddleware() Option {
+	return WithMiddlewareStack()
 }

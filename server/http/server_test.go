@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -235,4 +236,95 @@ func TestWithHealthChecks_OneFails(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+}
+
+func TestNew_DefaultStack_SetsRequestID(t *testing.T) {
+	// New() with no middleware options → default stack is mounted.
+	// RequestID middleware should inject X-Request-ID into every response.
+	lis, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+
+	srv, err := httpserver.New(httpserver.WithListener(lis))
+	require.NoError(t, err)
+	srv.Engine().GET("/ping", func(c *gin.Context) { c.String(200, "pong") })
+
+	ctx := context.Background()
+	go srv.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+	defer srv.Stop(ctx)
+
+	resp, err := http.Get("http://" + lis.Addr().String() + "/ping")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.NotEmpty(t, resp.Header.Get("X-Request-ID"), "default stack should inject X-Request-ID")
+}
+
+func TestNew_WithNoMiddleware_NoRequestID(t *testing.T) {
+	// WithNoMiddleware() → no request middleware at all.
+	// X-Request-ID should NOT appear in the response.
+	// Health endpoints must still be reachable.
+	lis, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+
+	srv, err := httpserver.New(
+		httpserver.WithListener(lis),
+		httpserver.WithNoMiddleware(),
+	)
+	require.NoError(t, err)
+	srv.Engine().GET("/ping", func(c *gin.Context) { c.String(200, "pong") })
+
+	ctx := context.Background()
+	go srv.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+	defer srv.Stop(ctx)
+
+	base := "http://" + lis.Addr().String()
+
+	// No request middleware → no X-Request-ID header
+	resp, err := http.Get(base + "/ping")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Empty(t, resp.Header.Get("X-Request-ID"), "bare mode should not inject X-Request-ID")
+
+	// Health endpoints still work regardless of middleware stack
+	hResp, err := http.Get(base + "/healthz")
+	require.NoError(t, err)
+	defer hResp.Body.Close()
+	assert.Equal(t, 200, hResp.StatusCode)
+}
+
+func TestNew_WithMiddlewareStack_CustomOnly(t *testing.T) {
+	// WithMiddlewareStack(custom) → only custom middleware runs; default stack is NOT mounted.
+	// Verify that X-Request-ID is absent (RequestID is not in the custom stack)
+	// and that the custom header IS present.
+	lis, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+
+	customHeader := func(c *gin.Context) {
+		c.Header("X-Custom", "yes")
+		c.Next()
+	}
+
+	srv, err := httpserver.New(
+		httpserver.WithListener(lis),
+		httpserver.WithMiddlewareStack(customHeader),
+	)
+	require.NoError(t, err)
+	srv.Engine().GET("/ping", func(c *gin.Context) { c.String(200, "pong") })
+
+	ctx := context.Background()
+	go srv.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+	defer srv.Stop(ctx)
+
+	resp, err := http.Get("http://" + lis.Addr().String() + "/ping")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, "yes", resp.Header.Get("X-Custom"), "custom middleware should run")
+	assert.Empty(t, resp.Header.Get("X-Request-ID"), "default RequestID should NOT be mounted")
+}
+
+func TestDefaultMiddlewareStack_ReturnsNonEmpty(t *testing.T) {
+	stack := httpserver.DefaultMiddlewareStack("svc", nil)
+	assert.Len(t, stack, 6, "default stack should have 6 handlers")
 }

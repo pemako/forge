@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/pemako/mk/core"
 	mw "github.com/pemako/mk/middleware/http"
 )
 
@@ -18,11 +19,33 @@ type ginServer struct {
 	ready atomic.Bool
 }
 
+// DefaultMiddlewareStack returns the handlers that New() mounts by default,
+// in their canonical order: RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler.
+//
+// Use this when you need to extend or partially replace the default stack
+// without copying its internal ordering into your code:
+//
+//	stack := httpserver.DefaultMiddlewareStack("my-svc", log)
+//	stack = append(stack, myAuthMiddleware)
+//	srv, _ := httpserver.New(httpserver.WithMiddlewareStack(stack...))
+func DefaultMiddlewareStack(serviceName string, log core.Logger) []gin.HandlerFunc {
+	return []gin.HandlerFunc{
+		mw.RequestID(),
+		mw.Tracing(serviceName),
+		mw.Logger(log),
+		mw.Metrics(),
+		mw.Recovery(),
+		mw.ErrorHandler(),
+	}
+}
+
 // New creates a new HTTP server with the default middleware stack pre-mounted.
 // The middleware order is: RequestID -> Tracing -> Logger -> Metrics ->
 // Recovery -> ErrorHandler. Health endpoints /healthz, /readyz, and /health
 // are registered automatically before any business routes.
 // Defaults: addr=":8080", readTimeout=30s, writeTimeout=30s.
+//
+// To customize the middleware stack, use WithMiddlewareStack or WithNoMiddleware.
 func New(opts ...Option) (*ginServer, error) {
 	o := options{
 		addr:           ":8080",
@@ -38,16 +61,16 @@ func New(opts ...Option) (*ginServer, error) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 
-	// Default middleware stack (order is significant):
-	// RequestID -> Tracing -> Logger -> Metrics -> Recovery -> ErrorHandler
-	r.Use(
-		mw.RequestID(),
-		mw.Tracing(o.serviceName),
-		mw.Logger(o.logger),
-		mw.Metrics(),
-		mw.Recovery(),
-		mw.ErrorHandler(),
-	)
+	// Mount middleware stack: use caller-supplied stack if explicitly set,
+	// otherwise fall back to the opinionated default.
+	// nil = not set (use default); non-nil (even empty) = caller's choice.
+	if o.middlewareStack != nil {
+		r.Use(o.middlewareStack...)
+	} else {
+		// Default middleware stack (order is significant):
+		// RequestID -> Tracing -> Logger -> Metrics -> Recovery -> ErrorHandler
+		r.Use(DefaultMiddlewareStack(o.serviceName, o.logger)...)
+	}
 
 	// Health routes — no auth, registered before business routes
 	r.GET("/healthz", healthzHandler(o.serviceName, o.serviceVersion))
