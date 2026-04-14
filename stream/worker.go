@@ -2,7 +2,9 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -65,15 +67,7 @@ func (w *streamWorker) Stop(_ context.Context) error {
 }
 
 func (w *streamWorker) consume(sub subscription) {
-	// Create a context that is cancelled when the worker is stopped.
-	// This allows XREADGROUP BLOCK 0 (infinite block) to be interrupted
-	// cleanly on shutdown instead of waiting for the next poll cycle.
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-w.done
-		cancel()
-	}()
-	defer cancel()
+	ctx := context.Background()
 
 	for {
 		select {
@@ -87,24 +81,29 @@ func (w *streamWorker) consume(sub subscription) {
 			Consumer: sub.consumer,
 			Streams:  []string{sub.topic, ">"},
 			Count:    10,
-			// Block: 0 = wait indefinitely for new messages.
-			// go-redis sets no TCP deadline for BLOCK 0, so the connection
-			// never times out. Shutdown is handled by cancelling ctx above.
-			Block: 0,
+			// Block: 2s — short enough for timely shutdown detection (the loop
+			// checks w.done before each call, so shutdown latency is ≤2s).
+			// With RESP2 (Protocol:2), Redis reliably returns redis.Nil after 2s
+			// when there are no messages. net.Error.Timeout() is treated as Nil
+			// as a safety net for transient connection-level timeouts.
+			Block: 2 * time.Second,
 		}).Result()
 
 		if err == redis.Nil {
 			continue
 		}
 		if err != nil {
-			// Context cancelled = clean shutdown; exit silently.
-			if ctx.Err() != nil {
-				return
-			}
 			select {
 			case <-w.done:
 				return
 			default:
+			}
+			// A net timeout after the BLOCK period means no messages arrived and
+			// the connection-level deadline fired before Redis sent the nil reply.
+			// Treat it identically to redis.Nil and retry without logging.
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				continue
 			}
 			w.log.Error(ctx, "stream: read error",
 				core.Field{Key: "topic", Value: sub.topic},
