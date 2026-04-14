@@ -33,5 +33,5 @@ go.work.sum
 
 .DS_Store
 logs
-docs/
+docs/superpowers/
 .worktrees/

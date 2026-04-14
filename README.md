@@ -4,6 +4,12 @@ An internal Go component library for building production-grade HTTP and gRPC ser
 
 ## Getting Started
 
+**Task-oriented recipes**: See [`docs/getting-started.md`](./docs/getting-started.md) for four scenario-based guides:
+- Minimal HTTP service (what's the least you need to know)
+- HTTP + database + Redis (recommended setup)
+- Pure worker service (cron / stream consumer, no HTTP)
+- What to ignore until you need it
+
 **Quick Start** (5 minutes): See [`example/quickstart`](./example/quickstart) for a minimal HTTP service with graceful shutdown.
 
 **Full Example**: See [`example/full`](./example/full) for database, cache, tracing, metrics, stream, cron, auth, storage, notifications, and pprof.
