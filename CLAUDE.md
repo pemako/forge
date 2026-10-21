@@ -24,13 +24,11 @@ go vet ./...
 
 # Lint (golangci-lint v1.x required)
 golangci-lint run ./...
-
-# Build and run the quickstart example (random port, no external deps)
-cd example/quickstart && go build ./... && go run .
-
-# Build and run the full example (requires config.yaml with database/cache/etc.)
-cd example/full && go build ./... && go run .
 ```
+
+Runnable examples live in a separate repository,
+[`github.com/pemako/forge-example`](https://github.com/pemako/forge-example),
+cloned as a sibling checkout. See "example repository" below.
 
 ## After completing any package work
 
@@ -39,7 +37,7 @@ After finishing any task that adds or modifies a package — before considering 
 1. **`CLAUDE.md`** — does the Package inventory list need updating? Are there new patterns, conventions, or cross-package rules introduced by this change?
 2. **`README.md`** — does the Features table or Package Reference section need a new row or updated description?
 3. **`ARCHITECTURE.md`** — do any architecture rules or patterns need updating?
-4. **`example/`** — does `example/full/` demonstrate the new or changed API? For significant API changes, also check if `example/quickstart/` needs updating.
+4. **`forge-example`** — if the change alters a public API an example uses, the example repo needs a matching update. It is a separate repo, so that is a follow-up change there, not part of this commit; call it out when finishing the task.
 
 If any are stale, update them as part of the same task. Do not wait to be asked.
 
@@ -48,7 +46,7 @@ If any are stale, update them as part of the same task. Do not wait to be asked.
 Every new package requires three steps — always do all three before committing:
 1. Add complete godoc (package-level comment + all exported identifiers)
 2. Update `README.md` (Features table + Package Reference section)
-3. Update `example/full/` to demonstrate the new package's key API
+3. Note whether `forge-example` should gain or update an example (separate repo; follow-up change)
 
 ### New package checklist
 
@@ -426,10 +424,22 @@ idgen:
   worker_id: 42   # unique per deployed instance
 ```
 
-### example service
+### example repository
 
-`example/` contains two separate Go modules:
-- `example/quickstart/` — minimal HTTP service demonstrating config, logger, gin routes, and app lifecycle. Uses `net.Listen(":0")` for a random port to avoid bind conflicts. Replace directive: `../../`.
-- `example/full/` — full-featured service demonstrating every mk package. Replace directive: `../../`.
+Runnable examples live in [`github.com/pemako/forge-example`](https://github.com/pemako/forge-example),
+not in this repo. It holds four independent modules — `01-quickstart`,
+`02-http-api`, `03-grpc-service`, `04-database` — each depending on a published
+`forge` commit pseudo-version rather than a replace directive, so they build
+from a fresh clone.
 
-Run `go mod tidy` inside the relevant subdirectory after adding new dependencies to the parent module.
+To test a local forge change against the examples, clone forge-example as a
+sibling directory and link the two with a workspace file (gitignored there):
+
+```bash
+cd ../forge-example
+go work init ./01-quickstart ./02-http-api ./03-grpc-service ./04-database
+go work use ../forge
+```
+
+After a release, bump the examples with `go get github.com/pemako/forge@main && go mod tidy`
+inside each module.

@@ -1,8 +1,0 @@
-logger:
-  level: info
-  output: stdout
-
-auth:
-  secret: "change-me-in-production"
-  expire: "24h"
-  issuer: "http-api"
