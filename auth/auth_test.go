@@ -24,10 +24,8 @@ const testSecret = "test-secret-key"
 
 func TestGenerate_and_FromContext(t *testing.T) {
 	claims := &testClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		},
-		UserID: 42,
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		UserID:    42,
 	}
 	token, err := auth.Generate(claims, auth.WithSecret(testSecret))
 	require.NoError(t, err)

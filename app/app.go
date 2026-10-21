@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -177,8 +178,8 @@ func (a *App) Run() error {
 		}
 	}
 
-	for i := len(a.opts.lifecycles) - 1; i >= 0; i-- {
-		if err := a.opts.lifecycles[i].Shutdown(stopCtx); err != nil {
+	for i, v := range slices.Backward(a.opts.lifecycles) {
+		if err := v.Shutdown(stopCtx); err != nil {
 			a.log(ctx, "app: lifecycle shutdown error",
 				core.Field{Key: "index", Value: i},
 				core.Field{Key: "err", Value: err.Error()},

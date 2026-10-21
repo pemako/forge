@@ -78,8 +78,7 @@ func Wrap(sentinel *CodedError, msg string, args ...any) *CodedError {
 // Code returns the HTTP status code from err. If err is not a *CodedError
 // (or does not wrap one), Code returns 500 (Internal Server Error).
 func Code(err error) int {
-	var ce *CodedError
-	if stderrors.As(err, &ce) {
+	if ce, ok := stderrors.AsType[*CodedError](err); ok {
 		return ce.Code
 	}
 	return http.StatusInternalServerError
@@ -88,8 +87,7 @@ func Code(err error) int {
 // Reason returns the machine-readable reason string from err. If err is not a
 // *CodedError (or does not wrap one), Reason returns "INTERNAL".
 func Reason(err error) string {
-	var ce *CodedError
-	if stderrors.As(err, &ce) {
+	if ce, ok := stderrors.AsType[*CodedError](err); ok {
 		return ce.Reason
 	}
 	return "INTERNAL"
