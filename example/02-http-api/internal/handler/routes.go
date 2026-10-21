@@ -1,13 +1,9 @@
-// Package handler wires all routes onto the huma API.
-// All routes use huma.Register so they appear in Swagger UI.
-// Auth: login is public; all other routes call requireAuth which
-// checks JWT claims stored in context by auth.Optional global middleware.
+// Package handler wires all routes onto the gin engine.
+// Auth: POST /auth/login is public; every /users route sits behind an
+// auth.Required group, so handlers can read claims straight from the context.
 package handler
 
 import (
-	"net/http"
-
-	"github.com/danielgtaylor/huma/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
@@ -23,79 +19,26 @@ type UserClaims struct {
 	Email  string `json:"email"`
 }
 
-// Register mounts all routes on the huma API.
-func Register(r *gin.Engine, api huma.API, svc *service.UserService, cfg core.Config) {
+// Register mounts all routes on the gin engine.
+//
+// Do not add RequestID/Logger/Recovery/ErrorHandler here — server/http.New
+// already mounts the default middleware stack.
+func Register(r *gin.Engine, svc *service.UserService, cfg core.Config) {
 	authOpts := []auth.Option{
 		auth.WithConfig(cfg),
 		auth.WithClaims(func() auth.Claims { return &UserClaims{} }),
 	}
 
-	// Register bearerAuth security scheme so Swagger UI shows the
-	// "Authorize" button and lets users enter their JWT token.
-	oapi := api.OpenAPI()
-	if oapi.Components == nil {
-		oapi.Components = &huma.Components{}
-	}
-	oapi.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
-		"bearerAuth": {
-			Type:         "http",
-			Scheme:       "bearer",
-			BearerFormat: "JWT",
-		},
-	}
-	// Apply bearerAuth globally — all operations require auth by default.
-	// Public operations override this with Security: []map[string][]string{}.
-	oapi.Security = []map[string][]string{{"bearerAuth": {}}}
+	// ── Auth (public) ─────────────────────────────────────────────────────────
+	r.POST("/auth/login", loginHandler(authOpts))
 
-	// auth.Optional parses the Bearer token if present and stores claims in
-	// context without blocking. Protected handlers call requireAuth themselves.
-	r.Use(auth.Optional(authOpts...))
-
-	// ── Auth ──────────────────────────────────────────────────────────────────
-	huma.Register(api, huma.Operation{
-		Method:      http.MethodPost,
-		Path:        "/auth/login",
-		Summary:     "Login",
-		Description: "Returns a JWT. Pass it as: Authorization: Bearer <token>",
-		Tags:        []string{"auth"},
-		Security:    []map[string][]string{}, // public: override global bearer requirement
-	}, loginHandler(authOpts))
-
-	// ── Users ─────────────────────────────────────────────────────────────────
-	huma.Register(api, huma.Operation{
-		Method:  http.MethodGet,
-		Path:    "/users",
-		Summary: "List users",
-		Tags:    []string{"users"},
-	}, listUsersHandler(svc))
-
-	huma.Register(api, huma.Operation{
-		Method:  http.MethodGet,
-		Path:    "/users/{id}",
-		Summary: "Get user",
-		Tags:    []string{"users"},
-	}, getUserHandler(svc))
-
-	huma.Register(api, huma.Operation{
-		Method:        http.MethodPost,
-		Path:          "/users",
-		Summary:       "Create user",
-		DefaultStatus: http.StatusCreated,
-		Tags:          []string{"users"},
-	}, createUserHandler(svc))
-
-	huma.Register(api, huma.Operation{
-		Method:  http.MethodPut,
-		Path:    "/users/{id}",
-		Summary: "Update user",
-		Tags:    []string{"users"},
-	}, updateUserHandler(svc))
-
-	huma.Register(api, huma.Operation{
-		Method:        http.MethodDelete,
-		Path:          "/users/{id}",
-		Summary:       "Delete user",
-		DefaultStatus: http.StatusNoContent,
-		Tags:          []string{"users"},
-	}, deleteUserHandler(svc))
+	// ── Users (JWT required) ──────────────────────────────────────────────────
+	// auth.Required rejects missing or invalid tokens with 401 before the
+	// handler runs, and stores the parsed claims in the request context.
+	users := r.Group("/users", auth.Required(authOpts...))
+	users.GET("", listUsersHandler(svc))
+	users.GET("/:id", getUserHandler(svc))
+	users.POST("", createUserHandler(svc))
+	users.PUT("/:id", updateUserHandler(svc))
+	users.DELETE("/:id", deleteUserHandler(svc))
 }

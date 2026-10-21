@@ -56,7 +56,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design guide.
 | `errors` | Structured `CodedError` with HTTP code, machine-readable reason, and cause chaining                                                                                |
 | `app`    | Lifecycle runner: Lifecycle.Init → BeforeStart → concurrent servers → Stop → Lifecycle.Shutdown → Closer.Close → AfterStop; `WithHealthCheck` / `HealthCheckers()` |
 | `config` | Viper-backed config loader with file, env-var, and hot-reload support                                                                                              |
-| `logger` | Zap-backed structured logger with trace injection, field masking, and level-split file output                                                                      |
+| `logger` | `log/slog`-backed structured logger with trace injection, field masking, and level-split file output                                                              |
 
 ### Infrastructure Integrations
 
@@ -87,7 +87,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design guide.
 | `ratelimit`      | `Limiter` interface; in-process token-bucket or Redis fixed-window; backs HTTP/gRPC middleware                                       |
 | `circuitbreaker` | Circuit breaker (Closed → Open → HalfOpen); `Execute(ctx, fn)`                                                                       |
 | `notify`         | Multi-channel notifications: Email (SMTP), SMS (Aliyun), DingTalk, WeCom, Feishu                                                     |
-| `idgen`          | Snowflake ID generator + ULID; `New()` → `Register("name", gen)` → `Get("name").Next()`; `CloseAll() error` (no-op, clears registry) |
+| `idgen`          | Snowflake ID generator + UUIDv7/v4; `New()` → `Register("name", gen)` → `Get("name").Next()`; `CloseAll() error` (no-op, clears registry) |
 | `pprof`          | pprof endpoints; standalone `core.Server` or mounted on an existing gin.Engine                                                       |
 
 ### Developer Utilities
@@ -258,10 +258,10 @@ cfg.Watch("logger.level", func(v any) { /* react to change */ })
 
 ### `logger`
 
-Zap-backed structured JSON logger. Auto-injects `trace_id`/`span_id` from an active OTel span.
+Structured JSON logger backed by the standard library's `log/slog`. Auto-injects `trace_id`/`span_id` from an active OTel span.
 
 ```go
-log, _ := logger.New(logger.WithConfig(cfg), logger.WithLogger(zap.New(...)))
+log, _ := logger.New(logger.WithConfig(cfg))
 logger.SetDefault(log) // optional bootstrap convenience
 
 log.Info(ctx, "user created", logger.F("user_id", 42))
@@ -695,7 +695,8 @@ idgen.Register("default", gen)
 id := idgen.Get("default").Next()         // int64 snowflake ID
 idStr := idgen.Get("default").NextString() // decimal string
 
-ulid := idgen.ULID()                       // time-sortable string, no registration needed
+uuid := idgen.UUID()                       // time-sortable UUIDv7, no registration needed
+token := idgen.UUIDv4()                    // fully random UUID, leaks no creation time
 ```
 
 > ⚠️ In production, always set `idgen.worker_id` in config. Without it, the worker ID is derived from the host's primary IP, which is unstable in containerized environments and may cause ID collisions across instances.
@@ -870,7 +871,7 @@ mk/
 ├── errors/            # CodedError — zero deps on other mk packages
 ├── app/               # lifecycle manager
 ├── config/            # Viper config loader
-├── logger/            # Zap structured logger
+├── logger/            # slog structured logger
 ├── tracing/           # OTel trace provider
 ├── metric/            # OTel metrics
 ├── server/

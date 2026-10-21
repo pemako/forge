@@ -4,26 +4,23 @@
 // File layout (single package, no sub-packages):
 //
 //	main.go    — wire & start
-//	handler.go — HTTP handlers (gin + huma)
+//	handler.go — HTTP handlers
 //	model.go   — request / response types
 //
 // Routes:
 //
-//	GET  /hello        plain gin handler
-//	GET  /ping         plain gin handler
-//	GET  /users/{id}   huma type-safe handler
-//	POST /users        huma type-safe handler
-//
-// Swagger UI: http://<addr>/docs
+//	GET  /hello        greeting, name from query string
+//	GET  /ping         liveness probe
+//	GET  /users/:id    fetch a user by ID
+//	POST /users        create a user
 package main
 
 import (
 	"context"
 	"net"
-	"net/http"
 
-	"github.com/danielgtaylor/huma/v2"
 	"github.com/gin-gonic/gin"
+
 	"github.com/pemako/forge/app"
 	"github.com/pemako/forge/config"
 	"github.com/pemako/forge/logger"
@@ -55,13 +52,12 @@ func main() {
 		httpserver.WithListener(ln),
 		httpserver.WithConfig(cfg),
 		httpserver.WithServiceName("quickstart"),
-		httpserver.WithOpenAPI("Quickstart API", "0.1.0", "/docs"),
 	)
 	if err != nil {
 		panic(err)
 	}
 
-	registerRoutes(srv.Engine(), srv.API())
+	registerRoutes(srv.Engine())
 
 	application := app.New(
 		app.WithName("quickstart"),
@@ -69,10 +65,7 @@ func main() {
 		app.WithServer(srv),
 		app.WithBeforeStart(func(ctx context.Context) error {
 			base := "http://localhost" + ln.Addr().String()
-			logger.Info(ctx, "quickstart started",
-				logger.F("addr", base),
-				logger.F("docs", base+"/docs"),
-			)
+			logger.Info(ctx, "quickstart started", logger.F("addr", base))
 			return nil
 		}),
 	)
@@ -84,23 +77,11 @@ func main() {
 	}
 }
 
-// registerRoutes mounts all gin and huma routes.
+// registerRoutes mounts all routes.
 // In a real service this would live in an internal/handler package.
-func registerRoutes(r *gin.Engine, api huma.API) {
+func registerRoutes(r *gin.Engine) {
 	r.GET("/hello", helloHandler)
 	r.GET("/ping", pingHandler)
-
-	huma.Register(api, huma.Operation{
-		Method:  http.MethodGet,
-		Path:    "/users/{id}",
-		Summary: "Get user",
-		Tags:    []string{"users"},
-	}, getUserHandler)
-
-	huma.Register(api, huma.Operation{
-		Method:  http.MethodPost,
-		Path:    "/users",
-		Summary: "Create user",
-		Tags:    []string{"users"},
-	}, createUserHandler)
+	r.GET("/users/:id", getUserHandler)
+	r.POST("/users", createUserHandler)
 }

@@ -4,7 +4,6 @@
     "grpcclient",
     "grpcserver",
     "httpclient",
-    "huma",
     "idgen",
     "lifecycles",
     "mkerrors",

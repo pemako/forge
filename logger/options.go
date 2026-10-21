@@ -1,6 +1,7 @@
-// Package logger provides a structured, leveled logger backed by Uber's zap library.
-// It implements core.Logger and automatically injects OpenTelemetry trace_id and
-// span_id fields from the request context. Log entries are emitted as JSON.
+// Package logger provides a structured, leveled logger backed by the standard
+// library's log/slog. It implements core.Logger and automatically injects
+// OpenTelemetry trace_id and span_id fields from the request context.
+// Log entries are emitted as JSON.
 //
 // Use New to create a logger, SetDefault to install it as the process-wide default,
 // and the package-level Info/Debug/Warn/Error functions to log without passing a

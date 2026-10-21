@@ -207,7 +207,6 @@ httpclient.Register("downstream", httpclient.New(httpclient.WithBaseURL("...")))
 httpSrv, _ := httpserver.New(
   httpserver.WithConfig(cfg),
   httpserver.WithLogger(log),
-  httpserver.WithOpenAPI("My Service", "v1.0", "/docs"), // 可选
   httpserver.WithHealthChecks(
     dbMgr.HealthChecker("default"),   // /readyz: SELECT 1
     cacheMgr.HealthChecker("redis"),  // /readyz: PING
@@ -215,8 +214,7 @@ httpSrv, _ := httpserver.New(
 )
 
 // ⑥ 注册路由
-huma.Register(httpSrv.API(), huma.Operation{...}, handler) // Huma 方式（自动生成文档）
-// 或: httpSrv.Engine().GET("/path", ginHandler)           // 原生 Gin 方式
+httpSrv.Engine().GET("/path", ginHandler)
 
 // ⑦ 组装并运行
 app.New(
@@ -370,21 +368,12 @@ srv, _ := httpserver.New(
   httpserver.WithConfig(cfg),
   httpserver.WithLogger(log),
   httpserver.WithServiceName("order-svc"),
-  httpserver.WithOpenAPI("Order API", "v1.0", "/docs"), // Swagger UI
   httpserver.WithHealthChecks(dbMgr.HealthChecker("default")),
 )
 
 // 注册路由（Gin 风格）
 r := srv.Engine()
 r.GET("/orders/:id", handler.GetOrder)
-
-// 注册路由（Huma 风格，自动生成 OpenAPI 文档）
-huma.Register(srv.API(), huma.Operation{
-  Method:  "GET",
-  Path:    "/orders/{id}",
-  Summary: "查询订单",
-  Tags:    []string{"orders"},
-}, getOrderHandler)
 ```
 
 **内置端点**：
@@ -392,7 +381,6 @@ huma.Register(srv.API(), huma.Operation{
 |------|------|
 | `/healthz` | 存活检查，始终返回 200 |
 | `/readyz` | 就绪检查，所有 HealthChecker 通过才返回 200 |
-| `/docs` | Swagger UI（需要 `WithOpenAPI`） |
 
 **自定义中间件栈**：
 

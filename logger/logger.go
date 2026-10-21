@@ -3,14 +3,18 @@ package logger
 import (
 	"context"
 	"io"
+	"log/slog"
+	"math"
 	"os"
+	"runtime"
+	"strconv"
 	"strings"
+	"time"
+
+	"go.opentelemetry.io/otel/trace"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/pemako/forge/core"
-	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // F creates a core.Field from a key-value pair.
@@ -19,8 +23,16 @@ func F(key string, value any) core.Field {
 	return core.Field{Key: key, Value: value}
 }
 
-type zapLogger struct {
-	z          *zap.Logger
+// timeFormat matches zap's ISO8601 encoder so existing log pipelines that parse
+// the "ts" field keep working.
+const timeFormat = "2006-01-02T15:04:05.000Z0700"
+
+// maxLevel is the upper bound for the error-level file, which captures
+// slog.LevelError and anything above it.
+const maxLevel = slog.Level(math.MaxInt32)
+
+type slogLogger struct {
+	h          slog.Handler
 	maskFields map[string]struct{} // lowercase field names to mask
 }
 
@@ -40,10 +52,61 @@ func maskValue(s string) string {
 	return string(r[:keep]) + "***" + string(r[n-keep:])
 }
 
-// New creates a new core.Logger backed by zap. Configuration is applied via
-// functional options; sensible defaults are used for any unset options:
-// level=info, output=stdout, maxSizeMB=100, maxAgeDays=7, maxBackups=10.
-// Returns an error if the level string is not a valid zapcore.Level.
+// shortCaller trims a full source path to "<dir>/<file>", matching zap's
+// ShortCallerEncoder (e.g. "/home/u/app/logger/logger.go" → "logger/logger.go").
+func shortCaller(file string) string {
+	last := strings.LastIndexByte(file, '/')
+	if last < 0 {
+		return file
+	}
+	prev := strings.LastIndexByte(file[:last], '/')
+	if prev < 0 {
+		return file
+	}
+	return file[prev+1:]
+}
+
+// replaceAttr normalises slog's built-in attributes to the field names and
+// encodings the previous zap-based implementation emitted: ts/level/msg/caller,
+// lowercase level names, ISO8601 timestamps, and stringified durations.
+func replaceAttr(groups []string, a slog.Attr) slog.Attr {
+	if len(groups) == 0 {
+		switch a.Key {
+		case slog.TimeKey:
+			return slog.String("ts", a.Value.Time().Format(timeFormat))
+		case slog.LevelKey:
+			lv, _ := a.Value.Any().(slog.Level)
+			return slog.String("level", strings.ToLower(lv.String()))
+		case slog.SourceKey:
+			src, ok := a.Value.Any().(*slog.Source)
+			if !ok || src.File == "" {
+				return slog.Attr{}
+			}
+			return slog.String("caller", shortCaller(src.File)+":"+strconv.Itoa(src.Line))
+		}
+	}
+	// slog renders time.Duration as an int64 nanosecond count; zap rendered it
+	// as a human-readable string. Keep the string form.
+	if d, ok := a.Value.Any().(time.Duration); ok {
+		return slog.String(a.Key, d.String())
+	}
+	return a
+}
+
+// newJSONHandler builds a JSON handler writing to w, enabled from min upward.
+func newJSONHandler(w io.Writer, min slog.Level) slog.Handler {
+	return slog.NewJSONHandler(w, &slog.HandlerOptions{
+		AddSource:   true,
+		Level:       min,
+		ReplaceAttr: replaceAttr,
+	})
+}
+
+// New creates a new core.Logger backed by the standard library's log/slog.
+// Configuration is applied via functional options; sensible defaults are used
+// for any unset options: level=info, output=stdout, maxSizeMB=100,
+// maxAgeDays=7, maxBackups=10.
+// Returns an error if the level string is not a valid slog.Level.
 func New(opts ...Option) (core.Logger, error) {
 	o := &options{
 		level:      "info",
@@ -56,46 +119,35 @@ func New(opts ...Option) (core.Logger, error) {
 		opt(o)
 	}
 
-	level := zapcore.InfoLevel
+	level := slog.LevelInfo
 	if err := level.UnmarshalText([]byte(o.level)); err != nil {
 		return nil, err
 	}
 
-	enc := zapcore.NewJSONEncoder(zapcore.EncoderConfig{
-		TimeKey:        "ts",
-		LevelKey:       "level",
-		MessageKey:     "msg",
-		CallerKey:      "caller",
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.StringDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	})
+	var handlers []slog.Handler
 
-	var cores []zapcore.Core
-
-	// stdout core
+	// stdout handler
 	if o.output == "stdout" || o.output == "both" || o.output == "" {
-		cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(os.Stdout), level))
+		handlers = append(handlers, newJSONHandler(os.Stdout, level))
 	}
 
-	// test writer override: skip file cores when writer is set
+	// test writer override: skip file handlers when writer is set
 	if o.writer != nil {
-		cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(o.writer), level))
+		handlers = append(handlers, newJSONHandler(o.writer, level))
 	} else if (o.output == "file" || o.output == "both") && o.filename != "" {
-		// Level-split file cores
+		// Level-split file handlers
 		levels := []struct {
-			name  string
-			level zapcore.Level
-			max   zapcore.Level
+			name string
+			min  slog.Level
+			max  slog.Level
 		}{
-			{"debug", zapcore.DebugLevel, zapcore.DebugLevel},
-			{"info", zapcore.InfoLevel, zapcore.InfoLevel},
-			{"warn", zapcore.WarnLevel, zapcore.WarnLevel},
-			{"error", zapcore.ErrorLevel, zapcore.FatalLevel},
+			{"debug", slog.LevelDebug, slog.LevelDebug},
+			{"info", slog.LevelInfo, slog.LevelInfo},
+			{"warn", slog.LevelWarn, slog.LevelWarn},
+			{"error", slog.LevelError, maxLevel},
 		}
 		for _, lv := range levels {
-			if lv.level < level {
+			if lv.min < level {
 				continue // skip levels below configured minimum
 			}
 			lj := &lumberjack.Logger{
@@ -105,19 +157,17 @@ func New(opts ...Option) (core.Logger, error) {
 				MaxBackups: o.maxBackups,
 				Compress:   false,
 			}
-			lvCopy := lv // capture for closure
-			levelEnabler := zap.LevelEnablerFunc(func(l zapcore.Level) bool {
-				return l >= lvCopy.level && l <= lvCopy.max
+			handlers = append(handlers, &rangeHandler{
+				inner: newJSONHandler(lj, lv.min),
+				min:   lv.min,
+				max:   lv.max,
 			})
-			cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(lj), levelEnabler))
 		}
 	}
 
-	if len(cores) == 0 {
-		cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(io.Discard), level))
+	if len(handlers) == 0 {
+		handlers = append(handlers, newJSONHandler(io.Discard, level))
 	}
-
-	z := zap.New(zapcore.NewTee(cores...), zap.AddCaller(), zap.AddCallerSkip(1))
 
 	// Build maskFields set
 	maskFields := make(map[string]struct{}, len(o.MaskFields))
@@ -125,23 +175,27 @@ func New(opts ...Option) (core.Logger, error) {
 		maskFields[strings.ToLower(f)] = struct{}{}
 	}
 
-	return &zapLogger{z: z, maskFields: maskFields}, nil
+	return &slogLogger{h: &fanoutHandler{handlers: handlers}, maskFields: maskFields}, nil
 }
 
-func extractTraceFields(ctx context.Context) []zap.Field {
+// traceAttrs returns trace_id and span_id attributes when ctx carries a
+// recording OpenTelemetry span, and nil otherwise.
+func traceAttrs(ctx context.Context) []slog.Attr {
 	span := trace.SpanFromContext(ctx)
 	if !span.IsRecording() {
 		return nil
 	}
 	sc := span.SpanContext()
-	return []zap.Field{
-		zap.String("trace_id", sc.TraceID().String()),
-		zap.String("span_id", sc.SpanID().String()),
+	return []slog.Attr{
+		slog.String("trace_id", sc.TraceID().String()),
+		slog.String("span_id", sc.SpanID().String()),
 	}
 }
 
-func toZapFields(ctx context.Context, fields []core.Field, maskFields map[string]struct{}) []zap.Field {
-	zf := extractTraceFields(ctx)
+// toAttrs converts core.Fields to slog attributes, redacting any field whose
+// name appears in maskFields.
+func toAttrs(fields []core.Field, maskFields map[string]struct{}) []slog.Attr {
+	attrs := make([]slog.Attr, 0, len(fields))
 	for _, f := range fields {
 		val := f.Value
 		if _, masked := maskFields[strings.ToLower(f.Key)]; masked {
@@ -151,33 +205,62 @@ func toZapFields(ctx context.Context, fields []core.Field, maskFields map[string
 				val = "***"
 			}
 		}
-		zf = append(zf, zap.Any(f.Key, val))
+		attrs = append(attrs, slog.Any(f.Key, val))
 	}
-	return zf
+	return attrs
 }
 
-func (l *zapLogger) Debug(ctx context.Context, msg string, fields ...core.Field) {
-	l.z.Debug(msg, toZapFields(ctx, fields, l.maskFields)...)
-}
-func (l *zapLogger) Info(ctx context.Context, msg string, fields ...core.Field) {
-	l.z.Info(msg, toZapFields(ctx, fields, l.maskFields)...)
-}
-func (l *zapLogger) Warn(ctx context.Context, msg string, fields ...core.Field) {
-	l.z.Warn(msg, toZapFields(ctx, fields, l.maskFields)...)
-}
-func (l *zapLogger) Error(ctx context.Context, msg string, fields ...core.Field) {
-	l.z.Error(msg, toZapFields(ctx, fields, l.maskFields)...)
-}
-func (l *zapLogger) With(fields ...core.Field) core.Logger {
-	zf := make([]zap.Field, len(fields))
-	for i, f := range fields {
-		zf[i] = zap.Any(f.Key, f.Value)
+// log emits one record. callerSkip frames are skipped when resolving the
+// "caller" attribute so it points at the application call site rather than
+// at this package.
+func (l *slogLogger) log(ctx context.Context, level slog.Level, msg string, fields []core.Field) {
+	if !l.h.Enabled(ctx, level) {
+		return
 	}
-	return &zapLogger{z: l.z.With(zf...), maskFields: l.maskFields}
+	// Skip runtime.Callers, this method, and the exported Debug/Info/Warn/Error
+	// wrapper so the caller attribute points at application code.
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:])
+
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.AddAttrs(traceAttrs(ctx)...)
+	r.AddAttrs(toAttrs(fields, l.maskFields)...)
+	_ = l.h.Handle(ctx, r)
 }
+
+func (l *slogLogger) Debug(ctx context.Context, msg string, fields ...core.Field) {
+	l.log(ctx, slog.LevelDebug, msg, fields)
+}
+func (l *slogLogger) Info(ctx context.Context, msg string, fields ...core.Field) {
+	l.log(ctx, slog.LevelInfo, msg, fields)
+}
+func (l *slogLogger) Warn(ctx context.Context, msg string, fields ...core.Field) {
+	l.log(ctx, slog.LevelWarn, msg, fields)
+}
+func (l *slogLogger) Error(ctx context.Context, msg string, fields ...core.Field) {
+	l.log(ctx, slog.LevelError, msg, fields)
+}
+
+// With returns a child logger that attaches fields to every subsequent record.
+// Masked field names are redacted here too, so a secret bound once via With is
+// never written in clear text.
+func (l *slogLogger) With(fields ...core.Field) core.Logger {
+	return &slogLogger{
+		h:          l.h.WithAttrs(toAttrs(fields, l.maskFields)),
+		maskFields: l.maskFields,
+	}
+}
+
+// discardHandler drops every record; it backs the no-op default logger.
+type discardHandler struct{}
+
+func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
+func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
+func (h discardHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
+func (h discardHandler) WithGroup(string) slog.Handler           { return h }
 
 // _default is the process-wide logger, initialized to a no-op.
-var _default core.Logger = &zapLogger{z: zap.NewNop()}
+var _default core.Logger = &slogLogger{h: discardHandler{}}
 
 // SetDefault sets the package-level default logger used as a fallback when no
 // logger is explicitly injected. Call this once at application startup in main()

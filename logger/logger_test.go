@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,6 +77,51 @@ func TestMaskFields(t *testing.T) {
 	assert.NotEqual(t, "supersecret123", entry["password"], "password should be masked")
 	assert.Equal(t, "***", entry["token"], "short token should be fully masked")
 	assert.Equal(t, "alice", entry["user"], "non-sensitive field should be unchanged")
+}
+
+// TestEncoding pins the wire format produced by the slog handler: the renamed
+// built-in keys, a lowercase level, an ISO8601 "ts", a short "caller" pointing
+// at the call site, and durations rendered as strings rather than nanoseconds.
+func TestEncoding(t *testing.T) {
+	var buf bytes.Buffer
+	log, err := logger.New(logger.WithLevel("debug"), logger.WithWriter(&buf))
+	require.NoError(t, err)
+
+	log.Info(context.Background(), "hello", logger.F("dur", 1500*time.Millisecond))
+
+	var entry map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &entry))
+	assert.Equal(t, "info", entry["level"])
+	assert.Equal(t, "hello", entry["msg"])
+	assert.Equal(t, "1.5s", entry["dur"], "durations must be human-readable, not nanoseconds")
+
+	ts, ok := entry["ts"].(string)
+	require.True(t, ok, "ts must be a string")
+	_, perr := time.Parse("2006-01-02T15:04:05.000Z0700", ts)
+	assert.NoError(t, perr, "ts must be ISO8601 with milliseconds, got %q", ts)
+
+	caller, ok := entry["caller"].(string)
+	require.True(t, ok, "caller must be present")
+	assert.True(t, strings.HasPrefix(caller, "logger/logger_test.go:"),
+		"caller must point at the call site, got %q", caller)
+}
+
+// TestMaskFields_With verifies that a secret bound once via With is redacted on
+// every subsequent record, not just when passed at the call site.
+func TestMaskFields_With(t *testing.T) {
+	var buf bytes.Buffer
+	log, err := logger.New(
+		logger.WithLevel("debug"),
+		logger.WithWriter(&buf),
+		logger.WithMaskFields("token"),
+	)
+	require.NoError(t, err)
+
+	log.With(logger.F("token", "supersecret123")).Info(context.Background(), "bound")
+
+	var entry map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &entry))
+	assert.NotEqual(t, "supersecret123", entry["token"], "With-bound secret should be masked")
 }
 
 func TestLevelSplitFiles(t *testing.T) {

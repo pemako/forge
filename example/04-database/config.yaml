@@ -1,0 +1,8 @@
+logger:
+  level: info
+  output: stdout
+
+database:
+  default:
+    driver: sqlite
+    dsn: "./data.db"

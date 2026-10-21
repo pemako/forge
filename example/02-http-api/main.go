@@ -2,22 +2,21 @@
 //
 // File layout:
 //
-//	main.go                       — wire & start
-//	internal/model/user.go        — domain types, gin and huma request/response structs
-//	internal/service/user.go      — business logic (in-memory store)
-//	internal/handler/routes.go    — route registration, JWT claims type
-//	internal/handler/auth.go      — login handler (gin)
-//	internal/handler/user_gin.go  — gin user handlers: list (pagination), update
-//	internal/handler/user_huma.go — huma user handlers: get, create, delete
+//	main.go                    — wire & start
+//	internal/model/user.go     — domain types, request/response structs
+//	internal/service/user.go   — business logic (in-memory store)
+//	internal/handler/routes.go — route registration, JWT claims type
+//	internal/handler/auth.go   — login handler
+//	internal/handler/user.go   — user CRUD handlers
 //
 // Routes:
 //
-//	POST /auth/login               no auth — returns JWT
-//	GET  /users                    auth required (gin) — paginated list
-//	PUT  /users/:id                auth required (gin) — update with validate.BindJSON
-//	GET  /users/{id}               auth via context (huma) — get by ID
-//	POST /users                    auth via context (huma) — create
-//	DELETE /users/{id}             auth via context (huma) — delete
+//	POST   /auth/login   no auth — returns JWT
+//	GET    /users        auth required — paginated list
+//	GET    /users/:id    auth required — get by ID
+//	POST   /users        auth required — create
+//	PUT    /users/:id    auth required — update
+//	DELETE /users/:id    auth required — delete
 package main
 
 import (
@@ -57,14 +56,13 @@ func main() {
 	srv, err := httpserver.New(
 		httpserver.WithListener(ln),
 		httpserver.WithServiceName("http-api"),
-		httpserver.WithOpenAPI("HTTP API Example", "0.1.0", "/docs"),
 	)
 	if err != nil {
 		panic(err)
 	}
 
 	svc := service.NewUserService()
-	handler.Register(srv.Engine(), srv.API(), svc, cfg)
+	handler.Register(srv.Engine(), svc, cfg)
 
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
 	base := "http://localhost:" + port
@@ -74,10 +72,7 @@ func main() {
 		app.WithVersion("0.1.0"),
 		app.WithServer(srv),
 		app.WithBeforeStart(func(ctx context.Context) error {
-			logger.Info(ctx, "http-api started",
-				logger.F("addr", base),
-				logger.F("docs", base+"/docs"),
-			)
+			logger.Info(ctx, "http-api started", logger.F("addr", base))
 			return nil
 		}),
 	)

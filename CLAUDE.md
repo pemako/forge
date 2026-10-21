@@ -224,7 +224,7 @@ core/            ← interfaces only (Logger, Config, Server, Provider, HealthCh
           core.HealthChecker: Name() string / Check(ctx context.Context) error
 errors/          ← CodedError (HTTP code + reason + cause chain), sentinel vars
 config/          ← viper implementation of core.Config
-logger/          ← zap + lumberjack; per-level log files; sensitive field masking
+logger/          ← log/slog + lumberjack; per-level log files; sensitive field masking
 app/             ← lifecycle manager: Migrator.Up → Lifecycle.Init → BeforeStart → Server.Start → signal
           → Server.Stop → Lifecycle.Shutdown (reverse) → Closer.Close → AfterStop
           Options: WithLifecycle(components...) / WithCloser(closers...)
@@ -284,11 +284,12 @@ storage/         ← Storage interface; S3 / Alibaba OSS / Tencent COS backends
           storage.CloseAll() error — clears all registered backends
 notify/          ← Email(SMTP) / SMS(Aliyun) / DingTalk / WeCom / Feishu notification channels
 pprof/           ← pprof profiling endpoints; standalone server (core.Server) or Register on gin.Engine
-idgen/           ← Snowflake ID generator + ULID
+idgen/           ← Snowflake ID generator + UUID
           gen, err := idgen.New(idgen.WithWorkerID(n)) — warns if worker_id not set explicitly
           idgen.Register("name", gen) / idgen.Get("name").Next() / idgen.Get("name").NextString()
           idgen.CloseAll() error — no-op (no connections to close), clears registry
-          idgen.ULID() — time-sortable string, no registration needed
+          idgen.UUID() — time-sortable UUIDv7 string, no registration needed
+          idgen.UUIDv4() — fully random UUID, not sortable
           Production: always set idgen.worker_id in config (IP-derived default is unstable in containers)
 testutil/        ← test helpers: FreePort, NewConfig (stub core.Config), NewLogger (writes to t.Log)
 ratelimit/       ← Limiter interface; in-process token-bucket or distributed Redis fixed-window; used by middleware

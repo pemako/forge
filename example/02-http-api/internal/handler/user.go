@@ -1,84 +1,100 @@
 package handler
 
 import (
-	"context"
+	"net/http"
+	"strconv"
 
-	"github.com/pemako/forge/auth"
+	"github.com/gin-gonic/gin"
+
 	"github.com/pemako/forge/errors"
 	"github.com/pemako/forge/example/02-http-api/internal/model"
 	"github.com/pemako/forge/example/02-http-api/internal/service"
 	"github.com/pemako/forge/pagination"
+	"github.com/pemako/forge/validate"
 )
 
-// requireAuth extracts JWT claims from context.
-// Returns 401 if auth.Optional did not store valid claims (missing/invalid token).
-func requireAuth(ctx context.Context) (*UserClaims, error) {
-	claims, ok := auth.FromContext[*UserClaims](ctx)
-	if !ok {
-		return nil, errors.Wrap(errors.ErrUnauthorized, "missing or invalid token")
+// pathID parses the :id path parameter, reporting 400 when it is not a
+// positive integer.
+func pathID(c *gin.Context) (int, error) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id < 1 {
+		return 0, errors.Wrap(errors.ErrBadRequest, "user id must be a positive integer")
 	}
-	return claims, nil
+	return id, nil
 }
 
-func listUsersHandler(svc *service.UserService) func(context.Context, *model.ListUsersInput) (*model.ListUsersOutput, error) {
-	return func(ctx context.Context, input *model.ListUsersInput) (*model.ListUsersOutput, error) {
-		if _, err := requireAuth(ctx); err != nil {
-			return nil, err
-		}
-		p := pagination.FromParams(input.Page, input.PageSize)
-		users, total := svc.List(ctx, pagination.Offset(p), p.PageSize)
-		result := pagination.New(total, users, p)
-		return &model.ListUsersOutput{Body: &result}, nil
+func listUsersHandler(svc *service.UserService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p := pagination.FromQuery(c)
+		users, total := svc.List(c.Request.Context(), pagination.Offset(p), p.PageSize)
+		c.JSON(http.StatusOK, pagination.New(total, users, p))
 	}
 }
 
-func getUserHandler(svc *service.UserService) func(context.Context, *model.GetUserInput) (*model.GetUserOutput, error) {
-	return func(ctx context.Context, input *model.GetUserInput) (*model.GetUserOutput, error) {
-		if _, err := requireAuth(ctx); err != nil {
-			return nil, err
-		}
-		user, err := svc.Get(ctx, input.ID)
+func getUserHandler(svc *service.UserService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := pathID(c)
 		if err != nil {
-			return nil, err
+			c.Error(err)
+			return
 		}
-		return &model.GetUserOutput{Body: user}, nil
-	}
-}
-
-func createUserHandler(svc *service.UserService) func(context.Context, *model.CreateUserInput) (*model.CreateUserOutput, error) {
-	return func(ctx context.Context, input *model.CreateUserInput) (*model.CreateUserOutput, error) {
-		if _, err := requireAuth(ctx); err != nil {
-			return nil, err
-		}
-		user, err := svc.Create(ctx, input.Body.Name, input.Body.Email)
+		user, err := svc.Get(c.Request.Context(), id)
 		if err != nil {
-			return nil, err
+			c.Error(err)
+			return
 		}
-		return &model.CreateUserOutput{Body: user}, nil
+		c.JSON(http.StatusOK, user)
 	}
 }
 
-func updateUserHandler(svc *service.UserService) func(context.Context, *model.UpdateUserInput) (*model.UpdateUserOutput, error) {
-	return func(ctx context.Context, input *model.UpdateUserInput) (*model.UpdateUserOutput, error) {
-		if _, err := requireAuth(ctx); err != nil {
-			return nil, err
+func createUserHandler(svc *service.UserService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req model.CreateUserRequest
+		if err := validate.BindJSON(c, &req); err != nil {
+			c.Error(err)
+			return
 		}
-		user, err := svc.Update(ctx, input.ID, input.Body.Name, input.Body.Email)
+		user, err := svc.Create(c.Request.Context(), req.Name, req.Email)
 		if err != nil {
-			return nil, err
+			c.Error(err)
+			return
 		}
-		return &model.UpdateUserOutput{Body: user}, nil
+		c.JSON(http.StatusCreated, user)
 	}
 }
 
-func deleteUserHandler(svc *service.UserService) func(context.Context, *model.DeleteUserInput) (*model.DeleteUserOutput, error) {
-	return func(ctx context.Context, input *model.DeleteUserInput) (*model.DeleteUserOutput, error) {
-		if _, err := requireAuth(ctx); err != nil {
-			return nil, err
+func updateUserHandler(svc *service.UserService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := pathID(c)
+		if err != nil {
+			c.Error(err)
+			return
 		}
-		if err := svc.Delete(ctx, input.ID); err != nil {
-			return nil, err
+		var req model.UpdateUserRequest
+		if err := validate.BindJSON(c, &req); err != nil {
+			c.Error(err)
+			return
 		}
-		return &model.DeleteUserOutput{}, nil
+		user, err := svc.Update(c.Request.Context(), id, req.Name, req.Email)
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		c.JSON(http.StatusOK, user)
+	}
+}
+
+func deleteUserHandler(svc *service.UserService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := pathID(c)
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		if err := svc.Delete(c.Request.Context(), id); err != nil {
+			c.Error(err)
+			return
+		}
+		c.Status(http.StatusNoContent)
 	}
 }
