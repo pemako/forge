@@ -7,6 +7,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
@@ -31,14 +32,36 @@ type Provider struct {
 // If no exporters are configured (no WithOTLP / WithOTLPGRPC / WithExporter
 // calls), a no-op provider is returned and no network connections are made.
 // Defaults: serviceName="service", sampler=1.0.
+//
+// New always installs the global OpenTelemetry text map propagator (W3C
+// TraceContext + Baggage by default; see WithPropagators), even when no
+// exporter is configured.
 func New(opts ...Option) (*Provider, error) {
 	o := options{
 		serviceName: "service",
 		sampler:     1.0,
 		insecure:    true, // default: no TLS; use WithTLS() or tracing.tls=true to enable
+		propagators: defaultPropagators(),
 	}
 	for _, opt := range opts {
 		opt(&o)
+	}
+
+	// Install the global text map propagator unconditionally, BEFORE the
+	// no-exporter early return below.
+	//
+	// Propagation and export are independent concerns. Extracting an inbound
+	// W3C `traceparent` and injecting it into outbound requests is what keeps a
+	// distributed trace connected across process boundaries; it does not require
+	// this process to export anything itself. A service that exports no spans
+	// (sampler 0, no collector, a thin proxy, a test binary) must still forward
+	// trace context to its downstream dependencies, otherwise those downstream
+	// spans start brand-new disconnected traces. Gating this on
+	// len(exporters) > 0 — i.e. placing it next to otel.SetTracerProvider below —
+	// would leave the global propagator as the delegating no-op, silently
+	// breaking the trace chain for every such process.
+	if len(o.propagators) > 0 {
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(o.propagators...))
 	}
 
 	ctx := context.Background()

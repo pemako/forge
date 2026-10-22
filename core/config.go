@@ -18,6 +18,10 @@ type Config interface {
 	GetBool(key string) bool
 	// GetDuration returns the time.Duration value for key, or 0 if not set.
 	GetDuration(key string) time.Duration
+	// IsSet reports whether key was explicitly configured. Every Get* method
+	// returns a zero value for a missing key, which makes "absent" and
+	// "configured as empty" indistinguishable; use this to tell them apart.
+	IsSet(key string) bool
 	// GetFloat64 returns the float64 value for key, or 0 if not set.
 	GetFloat64(key string) float64
 	// Scan unmarshals the sub-tree at key into dest (must be a pointer to a struct).

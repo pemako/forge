@@ -19,9 +19,11 @@ import (
 )
 
 type grpcServer struct {
-	opts options
-	s    *grpc.Server
-	lis  net.Listener
+	opts     options
+	s        *grpc.Server
+	lis      net.Listener
+	health   *health.Server
+	cancelUI context.CancelFunc
 }
 
 // New creates a new gRPC server with the default interceptor chain pre-configured.
@@ -69,9 +71,12 @@ func New(opts ...Option) (*grpcServer, error) {
 
 	s := grpc.NewServer(serverOpts...)
 
-	// Health check — no auth, always registered
+	// Health check — no auth, always registered. The service starts as
+	// NOT_SERVING: it must not advertise itself before migrations and
+	// Lifecycle.Init have run. app flips it via SetReady once every server has
+	// started, and back on shutdown.
 	hs := health.NewServer()
-	hs.SetServingStatus("", grpc_health.HealthCheckResponse_SERVING)
+	hs.SetServingStatus("", grpc_health.HealthCheckResponse_NOT_SERVING)
 	grpc_health.RegisterHealthServer(s, hs)
 
 	if o.reflection {
@@ -89,7 +94,21 @@ func New(opts ...Option) (*grpcServer, error) {
 		}
 	}
 
-	return &grpcServer{opts: o, s: s, lis: lis}, nil
+	return &grpcServer{opts: o, s: s, lis: lis, health: hs}, nil
+}
+
+// SetReady marks this server as serving or not serving in the gRPC health
+// protocol. app calls it automatically — ready once all servers have started,
+// not-ready as soon as shutdown begins, so clients using health-aware load
+// balancing stop picking this instance before it drains.
+//
+// It implements app.ReadinessToggler.
+func (g *grpcServer) SetReady(ready bool) {
+	status := grpc_health.HealthCheckResponse_NOT_SERVING
+	if ready {
+		status = grpc_health.HealthCheckResponse_SERVING
+	}
+	g.health.SetServingStatus("", status)
 }
 
 // Server returns the underlying *grpc.Server so callers can register gRPC
@@ -110,14 +129,41 @@ func (g *grpcServer) Addr() string {
 // It implements core.Server.
 func (g *grpcServer) Start(ctx context.Context) error {
 	if g.opts.grpcUIEnabled {
-		go g.startGRPCUI(ctx)
+		// grpcui is torn down when Stop cancels uiCtx. Previously this received
+		// app's root context, which is never cancelled, so the watcher goroutine
+		// never fired and the UI server was never shut down.
+		uiCtx, cancel := context.WithCancel(ctx)
+		g.cancelUI = cancel
+		go g.startGRPCUI(uiCtx)
 	}
 	return g.s.Serve(g.lis)
 }
 
 // Stop gracefully stops the gRPC server, waiting for in-flight RPCs to complete.
+// If ctx expires first, remaining connections are closed forcibly and ctx's
+// error is returned — GracefulStop on its own has no deadline and never returns
+// while a long-lived stream is open.
 // It implements core.Server.
-func (g *grpcServer) Stop(_ context.Context) error { g.s.GracefulStop(); return nil }
+func (g *grpcServer) Stop(ctx context.Context) error {
+	if g.cancelUI != nil {
+		g.cancelUI()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		g.s.GracefulStop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		g.s.Stop() // force-close remaining connections so Serve returns
+		<-done
+		return ctx.Err()
+	}
+}
 
 // startGRPCUI launches an HTTP server that serves the grpcui web interface.
 // It retries connecting to the gRPC server (via reflection) until ready.

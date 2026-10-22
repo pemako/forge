@@ -79,11 +79,16 @@ type Manager struct {
 }
 
 // New builds all configured cache backends and returns a Manager that owns them.
-// Returns an error if any Redis backend fails to connect.
+// Returns an error if any Redis backend fails to connect, or ErrInvalidConfig
+// if a WithConfig block could not be decoded.
 func New(opts ...Option) (*Manager, error) {
 	o := &options{}
 	for _, opt := range opts {
 		opt(o)
+	}
+	// Surface errors stashed by Options (which cannot return them themselves).
+	if o.err != nil {
+		return nil, o.err
 	}
 	if o.logger == nil {
 		o.logger = logger.Default()

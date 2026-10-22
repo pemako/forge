@@ -1,6 +1,15 @@
 package cache
 
-import "github.com/pemako/forge/core"
+import (
+	"github.com/pemako/forge/core"
+	mkerrors "github.com/pemako/forge/errors"
+)
+
+// ErrInvalidConfig is returned by New when the "cache" configuration block
+// cannot be decoded (e.g. a backend entry is a scalar instead of a map, or a
+// field has the wrong type). Previously such a block yielded zero backends
+// with no diagnostic.
+var ErrInvalidConfig = mkerrors.Define(500, "CACHE_INVALID_CONFIG", "invalid cache configuration")
 
 type backendEntry struct {
 	name     string
@@ -14,6 +23,9 @@ type backendEntry struct {
 type options struct {
 	backends []backendEntry
 	logger   core.Logger
+	// err holds the first error produced by an Option. Options cannot return
+	// errors, so WithConfig stashes decode failures here and New surfaces them.
+	err error
 }
 
 // Option is a functional option for configuring the cache.
@@ -53,6 +65,9 @@ func WithRedisAuth(name, addr, password string, db int) Option {
 //	  session:
 //	    backend: redis
 //	    addr: "redis-session:6379"
+//
+// A malformed "cache" block is reported by New as ErrInvalidConfig rather than
+// silently producing zero backends. An absent or empty block is not an error.
 func WithConfig(cfg core.Config) Option {
 	return func(o *options) {
 		// Scan the entire cache sub-tree into a map of backend configs.
@@ -62,7 +77,13 @@ func WithConfig(cfg core.Config) Option {
 			Password string `mapstructure:"password"`
 			DB       int    `mapstructure:"db"`
 		}
-		if err := cfg.Scan("cache", &entries); err != nil || len(entries) == 0 {
+		if err := cfg.Scan("cache", &entries); err != nil {
+			if o.err == nil {
+				o.err = mkerrors.Wrap(ErrInvalidConfig, "scan %q config block: %w", "cache", err)
+			}
+			return
+		}
+		if len(entries) == 0 {
 			return
 		}
 		for name, e := range entries {

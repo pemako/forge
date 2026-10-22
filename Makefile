@@ -1,4 +1,4 @@
-.PHONY: test test-race build lint vet fmt clean tidy help example-build example-run example-run-full
+.PHONY: test test-race build lint vet fmt clean tidy help
 
 # Default target
 all: vet lint test

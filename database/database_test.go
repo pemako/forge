@@ -21,6 +21,11 @@ func (m *mockConfig) GetString(key string) string   { v, _ := m.data[key].(strin
 func (m *mockConfig) GetInt(key string) int         { v, _ := m.data[key].(int); return v }
 func (m *mockConfig) GetBool(key string) bool       { v, _ := m.data[key].(bool); return v }
 func (m *mockConfig) GetFloat64(key string) float64 { v, _ := m.data[key].(float64); return v }
+func (m *mockConfig) IsSet(key string) bool {
+	_, ok := m.data[key]
+	return ok
+}
+
 func (m *mockConfig) GetDuration(key string) time.Duration {
 	v, _ := m.data[key].(time.Duration)
 	return v

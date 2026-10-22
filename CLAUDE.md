@@ -6,6 +6,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `github.com/pemako/forge` — Go 1.26 internal component library.
 
+## Breaking changes to know about
+
+Read this before touching `core`, `metric`, `server/grpc`, or anything that
+implements a forge interface.
+
+| Change | Impact |
+| ------ | ------ |
+| `core.Config` gained `IsSet(key string) bool` | Any external implementation of `core.Config` no longer compiles until it adds the method. In-tree: `config.viperConfig`, `testutil` stub, `database` test mock. |
+| `core.Closer` runs in **reverse** registration order | Was forward order. If you relied on `WithCloser(a, b)` closing `a` first, the order is now `b` then `a` — which is the correct nesting, matching `Lifecycle`. |
+| `metric.Provider.Init` returns `ErrNoExporters` when no exporter is configured | A service that previously started with an empty `metric:` block now fails at startup. Either configure `metric.prometheus_addr` / `metric.otlp_endpoint`, or pass `metric.WithAllowNoExporters()`. |
+| `metric.Provider.Init` binds the Prometheus listener synchronously | A port clash now returns `ErrPrometheusListen` instead of leaving `/metrics` quietly unserved. |
+| gRPC health service starts `NOT_SERVING` | It used to claim `SERVING` from `New()`, before migrations ran. `app` flips it via `SetReady`; a `server/grpc` used without `app` must call `SetReady(true)` itself. |
+| `middleware/grpc` HTTP→gRPC code mapping grew from 7 to 17 entries | Clients switching on gRPC codes see different codes for HTTP 408, 412, 413, 416, 422, 499, 501, 502, 503 and 504 — all of which previously fell through to `codes.Internal`. |
+| `middleware/grpc` metric `status` label | Now the real code name (`"NotFound"`, `"Unavailable"`), not `"OK"` / `"ERROR"`. Dashboards and alerts matching `status="ERROR"` must be rewritten. |
+| `RegisterHTTPMetricHooks` / `RegisterGRPCMetricHooks` gained an `errorsInc` parameter | Any direct caller (only `metric` in-tree) must pass the extra callback. |
+| `tracing.New` installs the global text map propagator unconditionally | Previously nothing was installed unless an exporter existed, so inbound `traceparent` headers were dropped and nothing was injected outbound. Expect traces to start connecting across services. |
+| `config.Watch` returns `ErrWatchDisabled` without `WithWatch()` | It used to accept a callback it could never invoke. |
+| `cache.New` / `database.New` return `ErrInvalidConfig` on a malformed block | Previously a decode failure silently produced zero backends / zero connections. |
+
 ## Commands
 
 ```bash
@@ -55,8 +74,9 @@ Before writing any code, verify:
 - [ ] Does it manage shared named resources? → use named registry pattern (`Register` / `Get` / `Replace` / `CloseAll`)
 - [ ] Does it hold a long-running goroutine? → implement `core.Server` (`Start` blocks, `Stop` unblocks)
 - [ ] Does it need Redis? → get client from `cache.RedisClient("name")`, never open a new connection directly
-- [ ] Does it have init/shutdown lifecycle? → implement `app.Lifecycle`
-- [ ] Does it hold closeable resources? → implement `app.Closer`
+- [ ] Does it have init/shutdown lifecycle? → implement `core.Lifecycle`
+- [ ] Does it hold closeable resources? → implement `core.Closer`
+- [ ] Does it record metrics? → depend on `core.Metrics`, not the `metric` package's globals
 
 ### Mandatory file layout
 
@@ -207,48 +227,109 @@ addr := ln.Addr().String()
 
 ### Import rules
 
-- `core/` packages may not import any other `mk` package
-- `errors/` may not import any other `mk` package
+- `core/` packages may not import any other `forge` package
+- `errors/` may not import any other `forge` package
 - Infrastructure packages (`cache`, `lock`, `stream`, …) may import `core/`, `errors/`, `logger/`
 - Never introduce a circular import — check with `go build ./...` before committing
 - New packages must not import `server/http`, `server/grpc`, `middleware/*`, or `app` (those are consumers, not libraries)
+- Implement `core.Lifecycle` / `core.Closer` / `core.Migrator`, never the `app` aliases — a
+  library package must not import `app`, and the `core` spelling can be compile-time asserted
 
 ## Architecture
 
 ### Package inventory
 
 ```
-core/            ← interfaces only (Logger, Config, Server, Provider, HealthChecker) — zero deps on other mk packages
+core/            ← interfaces only — zero deps on other forge packages
+          core.go/config.go/...: Logger, Config, Server, Provider, HealthChecker
+          core/lifecycle.go: Migrator, Lifecycle, Closer, ReadinessToggler, ReadyCheckRegistrar
+          core/metric.go: Metrics — Count / Gauge / Histogram(ctx, name, value, ...core.Field)
           core.HealthChecker: Name() string / Check(ctx context.Context) error
+          core.ReadinessToggler: SetReady(bool) — server/http + server/grpc implement it
+          core.ReadyCheckRegistrar: AddReadyCheck(name, func(ctx) error) — same two servers
+          *metric.Provider implements core.Metrics (compile-time asserted in metric/core.go)
+          BREAKING: core.Config now also requires IsSet(key string) bool
 errors/          ← CodedError (HTTP code + reason + cause chain), sentinel vars
+          errors.AsType[T](err) (T, bool) — generic wrapper over stdlib errors.AsType
+          prefer `ce, ok := errors.AsType[*errors.CodedError](err)` over the As dance
 config/          ← viper implementation of core.Config
+          config.Load(opts...) — WithFile / WithEnv / WithWatch / WithRequired /
+          WithKnownKeys / WithLogger
+          WithRequired(keys...) — Load fails with ErrMissingRequiredKey naming EVERY
+          missing key at once (fail fast instead of zero values at runtime)
+          WithKnownKeys(prefixes...) — Load logs one Warn listing undeclared keys
+          (typo detection); warning only, never fatal
+          cfg.UnknownKeys(declared) []string — programmatic access, to escalate yourself
+          cfg.IsSet(key) bool — distinguishes "absent" from "present but zero"
+          Watch returns ErrWatchDisabled when loaded without WithWatch
+          Sentinels live in config/errors.go
 logger/          ← log/slog + lumberjack; per-level log files; sensitive field masking
-app/             ← lifecycle manager: Migrator.Up → Lifecycle.Init → BeforeStart → Server.Start → signal
-          → Server.Stop → Lifecycle.Shutdown (reverse) → Closer.Close → AfterStop
-          Options: WithLifecycle(components...) / WithCloser(closers...)
-          Interfaces: Lifecycle{Init,Shutdown}, Closer{Close}, Migrator{Up}
-          WithHealthCheck(checkers ...core.HealthChecker) / HealthCheckers() []core.HealthChecker
+          logger.Default() is a DISCARD logger until logger.SetDefault is called
+app/             ← lifecycle manager; see "app.Run phases" below for the full order
+          Run() == RunContext(context.Background())
+          RunContext(ctx) — cancelling ctx requests the same graceful shutdown a
+          signal would; the shutdown sequence itself is not bound by ctx
+          App.Stop() — programmatic shutdown; idempotent, safe before Run
+          Options: WithName / WithVersion (both now appear in log output) /
+          WithLogger / WithServer / WithMigration / WithLifecycle / WithCloser /
+          WithBeforeStart / WithAfterStop / WithHealthCheck /
+          WithShutdownTimeout(30s default) / WithDrainDelay(0 default)
+          Interfaces are type ALIASES onto core: app.Lifecycle = core.Lifecycle etc.
+          Sentinels: ErrPanic (any phase panicked), ErrServersExited (every
+          Server.Start returned with no shutdown requested)
+          WithHealthCheck checkers are auto-registered on every server implementing
+          core.ReadyCheckRegistrar, before servers start — no manual bridging
+          HealthCheckers() []core.HealthChecker — still there for non-server wiring
 server/http/     ← gin server implementing core.Server; auto-mounts default middleware stack:
           RequestID → Tracing → Logger → Metrics → Recovery → ErrorHandler
           Do NOT re-add these middlewares manually — causes duplicate responses
           WithHealthChecks(...core.HealthChecker) — registers /readyz probes at construction
           AddReadyCheck(name, fn) — add /readyz probe after construction
+          SetReady(bool) — implements core.ReadinessToggler; app drives it
 server/grpc/     ← gRPC server implementing core.Server; auto-chains interceptors
+          SetReady(bool) drives the gRPC health protocol ("" service)
+          BREAKING: the health service now starts NOT_SERVING. It used to report
+          SERVING from New(), i.e. before migrations and Lifecycle.Init had run.
+          app flips it to SERVING once all servers started, and back on shutdown;
+          a server used WITHOUT app must call SetReady(true) itself or health-aware
+          clients will never route to it.
+          Stop(ctx) now honours ctx: GracefulStop races the deadline and remaining
+          connections are force-closed (ctx.Err() returned) instead of hanging
+          forever on a long-lived stream. The grpcui teardown goroutine now fires.
 middleware/http/ ← RequestID, Tracing, Logger, Metrics, Recovery, ErrorHandler
           + optional: CORS, Timeout, BodyLimit, RateLimit, IPFilter
+          ErrorHandler also records the error on the active span, sets span status
+          for 5xx, and increments *_http_errors_total{reason,code}
+          Logger picks level by status class: <400 INFO, 4xx WARN, 5xx ERROR, and
+          adds "error" + "error_reason" when the handler called c.Error — this is
+          where the errors.Wrap cause chain (withheld from the body) survives
+          ResetHTTPMetricHooks() — exported for tests; unwires metric.Init hooks
 middleware/grpc/ ← UnaryRequestID, UnaryLogger, UnaryMetrics, UnaryRecovery, UnaryErrorHandler
           + optional: UnaryTimeout, UnaryRateLimit, UnaryIPFilter
+          UnaryLogger: INFO on OK, WARN for caller-fault codes, ERROR otherwise;
+          adds "code", and "error" + "error_reason" on failure
+          UnaryMetrics labels with the real code name ("NotFound", "Unavailable"),
+          not the old "OK"/"ERROR"; also feeds *_grpc_errors_total{method,status}
+          UnaryErrorHandler maps 17 HTTP codes (was 7) and carries Reason +
+          Metadata over the wire as google.rpc.ErrorInfo under ErrorInfoDomain
+          ("forge"); context.DeadlineExceeded / Canceled map explicitly
+          ResetGRPCMetricHooks() — exported for tests
 database/        ← gorm multi-driver (mysql/postgres/sqlite); SQL tracing plugin; goose migrations
           database.New() → *Manager (no global side effects)
           database.Register("name", mgr) / database.Get("name") / database.DB("conn")
           database.CloseAll() error — closes and releases all registered managers
-          *Manager implements app.Migrator; Manager.Close() releases all connections
+          *Manager implements core.Migrator; Manager.Close() releases all connections
           Manager.HealthChecker(connName) core.HealthChecker — probes SELECT 1
+          New() returns ErrInvalidConfig when a WithConfig block fails to decode
+          (previously the block was skipped silently, yielding zero connections)
 cache/           ← Cache interface; Manager holds named backends (memory/Redis)
           cache.New() → *Manager (no global side effects)
           cache.Register("name", mgr) / cache.Client("name") / cache.RedisClient("name")
-          *Manager implements app.Closer; Manager.CloseBackend("name") / Manager.CloseAll()
+          *Manager implements core.Closer; Manager.CloseBackend("name") / Manager.CloseAll()
           Manager.HealthChecker(backendName) core.HealthChecker — memory: always healthy; redis: PING
+          New() returns ErrInvalidConfig when the "cache" block fails to decode
+          (previously produced zero backends with no diagnostic); an absent or
+          empty block is still not an error
 httpclient/      ← outbound HTTP; otelhttp tracing; exponential-backoff retry; named registry
           client, err := httpclient.New(opts...) — create instance
           httpclient.Register("name", client) / httpclient.Replace("name", client) / httpclient.Get("name")
@@ -269,9 +350,27 @@ stream/          ← Redis Streams pub/sub; Bus struct only — no package-level
           app.WithServer(bus.Worker()) — Worker implements core.Server
 tracing/         ← OTel OTLP provider; implements core.Provider and app.Lifecycle
           tracing.New() → *Provider; Init() is no-op; Shutdown() flushes spans
-metric/          ← Prometheus + OTLP; implements app.Lifecycle
+          New() ALWAYS installs the global text map propagator (W3C TraceContext +
+          Baggage), even with no exporter configured — this is what connects
+          traces across process boundaries. WithPropagators(...) overrides the set.
+metric/          ← Prometheus + OTLP; implements app.Lifecycle and core.Metrics
           metric.New() → *Provider; p.Init(ctx) starts exporters + wires middleware hooks
-          metric.Count / Gauge / StartTimer — package-level facade (idempotent sync.Once wiring)
+          metric.Count / Gauge / GaugeAdd / GaugeSub / StartTimer — package-level
+          facade taking metric.Label(...) options (NOT core.Field)
+          p.Count / p.Gauge / p.Histogram — the core.Metrics methods, taking core.Field
+          BREAKING: Init returns ErrNoExporters when neither metric.prometheus_addr
+          nor metric.otlp_endpoint is set. Opt out with WithAllowNoExporters().
+          ErrPrometheusListen — the Prometheus listener now binds synchronously, so
+          a port clash fails Init instead of leaving /metrics silently unserved.
+          Middleware hook wiring is no longer one-shot: the most recent Init wins.
+          Gauge uses SET semantics (OTel sync gauge), NOT accumulation — both
+          metric.Gauge and p.Gauge previously documented "sets" while adding.
+          Use GaugeAdd / GaugeSub for deltas.
+          WithReader(sdkmetric.Reader) — register an extra reader; pass
+          sdkmetric.NewManualReader() in tests to assert on recorded instruments.
+          A reader counts as a configured exporter, so Init won't return ErrNoExporters.
+          No WithLogger option — use WithServiceName / WithPrometheusAddr /
+          WithOTLPEndpoint / WithAllowNoExporters / WithConfig.
 auth/            ← JWT signing/verification; Required/Optional gin middleware; FromContext[T]
 validate/        ← go-playground/validator; BindJSON/BindForm/BindQuery/BindURI helpers
 pagination/      ← Params, Result[T], FromQuery, Offset, New[T]
@@ -314,13 +413,40 @@ reset()                                    // unexported; _test.go only
 
 Note: `Register` always accepts a **pre-built instance**, never options. Create with `New()` (or `Dial()` for grpcclient) first, then pass the instance to `Register`.
 
-**core.Server contract** — `Start` must block; `Stop` must be called to unblock it. `app.WithServer` runs each server in a goroutine. `cron.Scheduler`, `stream.Bus.Worker()`, and both network servers implement this interface.
+**core.Server contract** — `Start` must block; `Stop` must be called to unblock it. `app.WithServer` runs each server in a goroutine. `cron.Scheduler`, `stream.Bus.Worker()`, and both network servers implement this interface. If every registered server's `Start` returns while the app is still meant to be serving, `app.Run` returns `app.ErrServersExited` rather than blocking forever.
 
-**app.Lifecycle contract** — `Init` is called before servers start (sequential), `Shutdown` is called after servers stop (reverse order). If `Init[i]` fails, all previously-Init'd components are Shutdown in reverse before `Run` returns. Implemented by `tracing.Provider` and `metric.Provider`.
+**Lifecycle contracts live in `core`** — `Migrator`, `Lifecycle`, `Closer`, `ReadinessToggler` and `ReadyCheckRegistrar` are declared in `core/lifecycle.go`, not in `app`. A library package (which must not import `app`) can therefore assert `var _ core.Lifecycle = (*T)(nil)` at compile time. `app` keeps type aliases, so `app.Lifecycle`, `app.Closer` and `app.Migrator` still compile unchanged.
 
-**app.Closer contract** — `Close` is called after all `Lifecycle.Shutdown` calls complete. Implemented by `cache.Manager` and `grpcclient.Registry`.
+**core.Lifecycle contract** — `Init` is called before servers start (sequential), `Shutdown` is called after servers stop (reverse order). If `Init[i]` fails, all previously-Init'd components are Shutdown in reverse **and every Closer is Closed** before `Run` returns. The same rollback now also happens when a `BeforeStart` hook or a migration fails — previously those paths leaked every pool already opened. Implemented by `tracing.Provider` and `metric.Provider`.
 
-**Metrics stub + late wiring** — `middleware/http` and `middleware/grpc` expose hook registration functions. These are no-ops until `metric.Provider.Init()` is called, breaking the import cycle between middleware and metric. Wire functions are idempotent via `sync.Once`.
+**core.Closer contract** — `Close` is called after all `Lifecycle.Shutdown` calls complete, in **reverse registration order** (it used to be forward order, which tore down a dependency before the Closer that used it). `Close` takes no context, so `app` runs each one in a goroutine and bounds the wait by the shutdown budget: a hung `Close` leaks that goroutine but no longer hangs the process. Implemented by `cache.Manager` and `grpcclient.Registry`.
+
+**Metrics stub + late wiring** — `middleware/http` and `middleware/grpc` expose hook registration functions. These are no-ops until `metric.Provider.Init()` is called, breaking the import cycle between middleware and metric. The hook set is held in an `atomic.Pointer` and swapped as one immutable value, so wiring is race-free and repeatable: a second `Init` replaces the first set instead of being silently ignored (the old `sync.Once` guard meant a second Provider kept reporting through the first one's instruments, under the first one's service name). `ResetHTTPMetricHooks()` / `ResetGRPCMetricHooks()` restore the no-ops for tests.
+
+### app.Run phases
+
+```
+ 1. Readiness probes from WithHealthCheck registered on every server implementing
+    core.ReadyCheckRegistrar — before anything serves traffic
+ 2. Migrator.Up()
+ 3. Lifecycle.Init()          sequential
+ 4. BeforeStart hooks         sequential
+ 5. Server.Start() × N        concurrent; then every server marked ready
+ 6. Block                     until signal / Stop() / ctx cancel / server failure
+ 7. Servers marked NOT ready, then WithDrainDelay is waited out
+ 8. Server.Stop() × N         concurrent, within the shutdown budget
+ 9. Lifecycle.Shutdown()      reverse registration order
+10. Closer.Close()            reverse registration order
+11. AfterStop hooks           sequential
+```
+
+Rules that are easy to get wrong:
+
+- **Signals are trapped before migrations.** Previously `signal.Notify` ran only after servers launched, so a SIGTERM during a migration killed the process mid-migration.
+- **A second SIGTERM/SIGINT abandons the remaining waits**, so an operator is never stuck with a process that ignores signals.
+- **Each post-server phase gets its own deadline**, floored at 5s (`minPhaseTimeout`, capped by `WithShutdownTimeout`), so a slow server drain cannot starve telemetry flushing.
+- **Panics are recovered** in every lifecycle callback, hook and server goroutine, logged with their stack, and reported as `app.ErrPanic`; the remaining shutdown phases still run.
+- **Startup failure at phase 2, 3 or 4 rolls back** the already-init'd Lifecycles *and* runs the Closers.
 
 ### HealthChecker integration
 
@@ -334,9 +460,49 @@ hc := cacheMgr.HealthChecker("redis")   // returns core.HealthChecker; probes PI
 ```
 
 Wire into `/readyz` via:
-- `httpserver.WithHealthChecks(checkers...)` — at construction time
-- `httpSrv.AddReadyCheck(name, fn)` — after construction (e.g. in BeforeStart)
-- `app.WithHealthCheck(checkers...)` + `myApp.HealthCheckers()` — centralized holding with manual bridging
+- `app.WithHealthCheck(checkers...)` — **preferred**. `Run` registers every checker on
+  each server implementing `core.ReadyCheckRegistrar` (both built-in servers do),
+  before any server starts. No bridging hook is needed.
+- `httpserver.WithHealthChecks(checkers...)` — at construction time, when you are not using `app`.
+- `httpSrv.AddReadyCheck(name, fn)` — ad-hoc probe that is not a `core.HealthChecker`.
+
+```go
+// Correct, and all that is needed:
+app.New(
+    app.WithServer(httpSrv, grpcSrv),
+    app.WithHealthCheck(dbMgr.HealthChecker("default"), cacheMgr.HealthChecker("redis")),
+).Run()
+```
+
+> **Obsolete recipe — do not reintroduce it.** The old pattern below is now
+> redundant; `WithHealthCheck` used to store the checkers and wire nothing.
+>
+> ```go
+> // ❌ no longer necessary
+> app.WithBeforeStart(func(ctx context.Context) error {
+>     for _, hc := range a.HealthCheckers() {
+>         httpSrv.AddReadyCheck(hc.Name(), hc.Check)
+>     }
+>     return nil
+> })
+> ```
+
+If no registered server accepts probes, `Run` logs that the checkers went nowhere
+instead of discarding them silently.
+
+### Readiness is driven by app
+
+Do **not** call `httpSrv.SetReady(true)` from a `BeforeStart` hook any more. `app`
+marks every server implementing `core.ReadinessToggler` ready once all servers
+have started, and not-ready at the very start of shutdown. Setting it true in
+`BeforeStart` advertises readiness before the listener is up; combined with
+`WithDrainDelay`, letting `app` own the flag is what gives a load balancer time to
+stop routing into a draining instance.
+
+`WithDrainDelay(d)` (default 0) is the pause between "marked not-ready" and
+"servers stopped". Set it to roughly `periodSeconds × failureThreshold` of your
+Kubernetes readiness probe, and keep `WithDrainDelay + WithShutdownTimeout` below
+`terminationGracePeriodSeconds`.
 
 ### Error handling convention
 
@@ -350,15 +516,79 @@ return nil, errors.Wrap(ErrUserNotFound, "query user: %w", dbErr)
 // Check type
 if errors.Is(err, ErrUserNotFound) { ... }
 
+// Extract — prefer AsType over the As declare-then-point dance
+if ce, ok := errors.AsType[*errors.CodedError](err); ok { _ = ce.Reason }
+
 // HTTP handler — use c.Error(); ErrorHandler middleware converts to JSON
 c.Error(err)   // NOT c.JSON(500, gin.H{"error": err.Error()})
 ```
 
 Non-`CodedError` values returned from handlers produce a generic 500 (message not forwarded).
 
+**The cause chain is never in the response body — but it is no longer lost.**
+`errors.Wrap` context stays out of both the HTTP body and the gRPC status message.
+It is now recorded on the active span by `middleware/http.ErrorHandler` and written
+as the `error` / `error_reason` fields by `middleware/http.Logger` and
+`middleware/grpc.UnaryLogger`. When debugging a 500, read the log line or the span,
+not the response.
+
+**gRPC clients should dispatch on `Reason`, not the message.**
+`middleware/grpc.UnaryErrorHandler` attaches `CodedError.Reason` and `.Metadata` as a
+`google.rpc.ErrorInfo` detail with `Domain == grpcMiddleware.ErrorInfoDomain` ("forge"):
+
+```go
+for _, d := range status.Convert(err).Details() {
+    if info, ok := d.(*errdetails.ErrorInfo); ok && info.Domain == grpcMiddleware.ErrorInfoDomain {
+        _ = info.Reason   // "USER_NOT_FOUND"
+    }
+}
+```
+
 ### Context discipline
 
 Every log call receives `ctx`. The logger extracts `trace_id` / `span_id` automatically from any active OTel span. All outbound clients (`httpclient`, `grpcclient`, `stream`) propagate trace context through headers/metadata.
+
+### Trace propagation
+
+`tracing.New()` installs the global OTel text map propagator — W3C TraceContext
+(`traceparent` / `tracestate`) plus W3C Baggage — **unconditionally**, before the
+no-exporter early return. Propagation and export are independent concerns: a
+process that exports nothing itself (sampler 0, no collector, a thin proxy, a test
+binary) must still forward inbound trace context downstream, or those downstream
+spans start brand-new disconnected traces.
+
+This means `tracing.New()` must be called even when tracing is "off", otherwise
+the global propagator stays the delegating no-op and the trace chain breaks.
+`tracing.WithPropagators(...)` replaces the set (combined with
+`propagation.NewCompositeTextMapPropagator`) — only needed to interoperate with a
+different wire format, e.g. B3 for a legacy Zipkin mesh. Passing no propagators
+leaves whatever is already global untouched.
+
+### Configuration fail-fast
+
+Declare what a service cannot start without, instead of discovering zero values at
+runtime:
+
+```go
+cfg, err := config.Load(
+    config.WithFile("config.yaml"),
+    config.WithEnv("APP"),
+    config.WithRequired("database.default.dsn", "cache.redis.addr"),
+    config.WithKnownKeys("app", "server", "logger", "database", "cache", "metric"),
+)
+```
+
+- `WithRequired` → `Load` fails with `ErrMissingRequiredKey` naming **every** missing
+  key at once, so a misconfigured deployment needs one restart to diagnose, not one
+  per key. A key supplied only via `WithEnv` satisfies it; a key present but empty
+  counts as missing.
+- `WithKnownKeys` → one Warn listing keys nothing declared (in practice a typo like
+  `databse.default.dsn`). Warning only, deliberately: config files legitimately carry
+  keys this library knows nothing about. Use `cfg.UnknownKeys(declared)` to escalate
+  it to an error yourself.
+- `cfg.IsSet(key)` distinguishes "absent" from "present but zero" — `GetInt` returns
+  0 for both a missing key and `port: 0`. It is part of `core.Config`, so no type
+  assertion is needed.
 
 ### Redis connection sharing
 
@@ -407,9 +637,12 @@ r.GET("/users", handler.ListUsers)
 
 When `output: file`, each level writes to a separate file: `{filename}.debug.log`, `.info.log`, `.warn.log`, `.error.log`. The `filename` config key is the base path (e.g. `logs/app`). If `filename` is empty, no files are created even when `output: file`.
 
-### app.Migrator interface
+### core.Migrator interface
 
-Defined in `app/options.go` (not in database) to avoid an import cycle. `*database.Manager` implements it. Pass via `app.WithMigration(manager)` to run goose migrations before `BeforeStart` hooks fire.
+Defined in `core/lifecycle.go` (not in `database`, and no longer in `app`) to avoid an
+import cycle while still letting `*database.Manager` assert the contract at compile
+time. `app.Migrator` is a type alias onto it. Pass via `app.WithMigration(manager)` to
+run goose migrations before `BeforeStart` hooks fire.
 
 ### cron sub-second intervals
 

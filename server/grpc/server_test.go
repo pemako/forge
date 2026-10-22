@@ -14,6 +14,10 @@ import (
 	grpcserver "github.com/pemako/forge/server/grpc"
 )
 
+// TestGRPCServer_healthCheck covers the readiness contract: the health service
+// reports NOT_SERVING until something marks the server ready, so it cannot
+// advertise itself before migrations and Lifecycle.Init have run. app drives
+// SetReady automatically; this test does it by hand.
 func TestGRPCServer_healthCheck(t *testing.T) {
 	srv, err := grpcserver.New(grpcserver.WithAddr(":0"))
 	require.NoError(t, err)
@@ -29,7 +33,20 @@ func TestGRPCServer_healthCheck(t *testing.T) {
 	defer conn.Close()
 
 	hc := grpc_health.NewHealthClient(conn)
+
 	resp, err := hc.Check(ctx, &grpc_health.HealthCheckRequest{})
 	require.NoError(t, err)
+	assert.Equal(t, grpc_health.HealthCheckResponse_NOT_SERVING, resp.Status,
+		"a freshly constructed server must not advertise itself as serving")
+
+	srv.SetReady(true)
+	resp, err = hc.Check(ctx, &grpc_health.HealthCheckRequest{})
+	require.NoError(t, err)
 	assert.Equal(t, grpc_health.HealthCheckResponse_SERVING, resp.Status)
+
+	srv.SetReady(false)
+	resp, err = hc.Check(ctx, &grpc_health.HealthCheckRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health.HealthCheckResponse_NOT_SERVING, resp.Status,
+		"readiness must be revocable so clients stop picking a draining instance")
 }

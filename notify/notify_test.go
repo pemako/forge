@@ -227,6 +227,7 @@ func (s *stubConfig) Get(_ string) any                   { return nil }
 func (s *stubConfig) GetString(_ string) string          { return "" }
 func (s *stubConfig) GetInt(_ string) int                { return 0 }
 func (s *stubConfig) GetBool(_ string) bool              { return false }
+func (s *stubConfig) IsSet(_ string) bool                { return false }
 func (s *stubConfig) GetDuration(_ string) time.Duration { return 0 }
 func (s *stubConfig) GetFloat64(_ string) float64        { return 0 }
 func (s *stubConfig) GetStringSlice(_ string) []string   { return nil }

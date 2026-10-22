@@ -47,10 +47,15 @@ var ErrAlreadyRegistered = errors.Define(409, "DATABASE_ALREADY_REGISTERED", "da
 // applies connection pool settings, and optionally installs the tracing plugin.
 // Connections are stored on the returned Manager; nothing is written to the
 // global registry. Use Register to make the Manager accessible by name.
+// Returns ErrInvalidConfig if a WithConfig block could not be decoded.
 func New(opts ...Option) (*Manager, error) {
 	o := options{}
 	for _, opt := range opts {
 		opt(&o)
+	}
+	// Surface errors stashed by Options (which cannot return them themselves).
+	if o.err != nil {
+		return nil, o.err
 	}
 	m := &Manager{
 		opts:        o,

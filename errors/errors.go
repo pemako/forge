@@ -98,6 +98,13 @@ func Reason(err error) string {
 // target to that error value.
 func As(err error, target any) bool { return stderrors.As(err, target) }
 
+// AsType is a convenience wrapper around stdlib errors.AsType.
+// It returns the first error in err's chain that matches type T, and whether
+// one was found — avoiding the declare-then-pass-a-pointer dance that As needs:
+//
+//	if ce, ok := errors.AsType[*errors.CodedError](err); ok { ... }
+func AsType[T error](err error) (T, bool) { return stderrors.AsType[T](err) }
+
 // Is is a convenience wrapper around stdlib errors.Is.
 // It reports whether any error in err's chain matches target, using CodedError.Is
 // for *CodedError comparisons (which matches on Reason, not pointer equality).

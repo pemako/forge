@@ -2,6 +2,8 @@ package metric
 
 import (
 	"context"
+	stderrors "errors"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -14,7 +16,14 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+
+	ferrors "github.com/pemako/forge/errors"
+	"github.com/pemako/forge/logger"
 )
+
+// ErrPrometheusListen is returned by Init when the Prometheus /metrics listener
+// cannot bind its configured address.
+var ErrPrometheusListen = ferrors.Define(500, "METRIC_PROMETHEUS_LISTEN", "prometheus listener failed")
 
 // Provider wraps OpenTelemetry metric exporters and the optional Prometheus
 // HTTP server. It implements the app.Lifecycle interface (Init + Shutdown).
@@ -45,14 +54,30 @@ func (p *Provider) Meter() otelmetric.Meter {
 	return p.meter
 }
 
+// ErrNoExporters is returned by Init when neither a Prometheus address nor an
+// OTLP endpoint is configured. A MeterProvider with no reader silently discards
+// every measurement, so this is reported rather than left to be discovered from
+// an empty dashboard. Pass WithAllowNoExporters to opt out.
+var ErrNoExporters = ferrors.Define(500, "METRIC_NO_EXPORTERS",
+	"no metric exporter configured: set metric.prometheus_addr or metric.otlp_endpoint, or pass WithAllowNoExporters")
+
 // Init sets up exporters, registers the MeterProvider with the global OTel
 // registry, and wires middleware instrumentation hooks. It implements the
 // app.Lifecycle Init method.
 // Calling Init more than once on the same Provider is a no-op.
+//
+// Init returns ErrNoExporters when no exporter is configured, and fails if the
+// Prometheus listener cannot bind — the address is bound synchronously so a port
+// clash surfaces here instead of leaving /metrics quietly unserved.
 func (p *Provider) Init(ctx context.Context) error {
 	if p.mp != nil {
 		// Already initialized.
 		return nil
+	}
+
+	if p.opts.prometheusAddr == "" && p.opts.otlpEndpoint == "" &&
+		len(p.opts.readers) == 0 && !p.opts.allowNoExporters {
+		return ErrNoExporters
 	}
 
 	res, _ := resource.New(ctx,
@@ -62,6 +87,10 @@ func (p *Provider) Init(ctx context.Context) error {
 	var sdkOpts []sdkmetric.Option
 	sdkOpts = append(sdkOpts, sdkmetric.WithResource(res))
 
+	for _, r := range p.opts.readers {
+		sdkOpts = append(sdkOpts, sdkmetric.WithReader(r))
+	}
+
 	if p.opts.prometheusAddr != "" {
 		pe, err := promexp.New()
 		if err != nil {
@@ -69,10 +98,24 @@ func (p *Provider) Init(ctx context.Context) error {
 		}
 		sdkOpts = append(sdkOpts, sdkmetric.WithReader(pe))
 
+		// Bind synchronously so an address clash is reported from Init. This
+		// used to be `go p.promSrv.ListenAndServe()` with the error discarded,
+		// which meant a taken port left /metrics permanently unserved while the
+		// service reported itself healthy.
+		lis, err := net.Listen("tcp", p.opts.prometheusAddr)
+		if err != nil {
+			return ferrors.Wrap(ErrPrometheusListen, "metric: listen %s: %w", p.opts.prometheusAddr, err)
+		}
+
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
-		p.promSrv = &http.Server{Addr: p.opts.prometheusAddr, Handler: mux}
-		go p.promSrv.ListenAndServe() //nolint:errcheck
+		p.promSrv = &http.Server{Handler: mux}
+		go func() {
+			if err := p.promSrv.Serve(lis); err != nil && !stderrors.Is(err, http.ErrServerClosed) {
+				logger.Error(context.Background(), "metric: prometheus server stopped",
+					logger.F("error", err))
+			}
+		}()
 	}
 
 	if p.opts.otlpEndpoint != "" {

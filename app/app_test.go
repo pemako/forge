@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -13,10 +14,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockServer struct{ started, stopped bool }
+// mockServer honours the core.Server contract: Start blocks until Stop is
+// called. A Start that returns early is a contract violation and Run now
+// reports it as app.ErrServersExited.
+type mockServer struct {
+	mu      sync.Mutex
+	started bool
+	stopped bool
+	done    chan struct{}
+}
 
-func (m *mockServer) Start(_ context.Context) error { m.started = true; return nil }
-func (m *mockServer) Stop(_ context.Context) error  { m.stopped = true; return nil }
+func newMockServer() *mockServer { return &mockServer{done: make(chan struct{})} }
+
+func (m *mockServer) Start(_ context.Context) error {
+	m.mu.Lock()
+	m.started = true
+	m.mu.Unlock()
+	<-m.done
+	return nil
+}
+
+func (m *mockServer) Stop(_ context.Context) error {
+	m.mu.Lock()
+	alreadyStopped := m.stopped
+	m.stopped = true
+	m.mu.Unlock()
+	if !alreadyStopped {
+		close(m.done)
+	}
+	return nil
+}
+
+func (m *mockServer) isStarted() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.started
+}
+
+func (m *mockServer) isStopped() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.stopped
+}
 
 type mockMigrator struct{ called bool }
 
@@ -42,15 +81,15 @@ func sendSIGTERM() {
 }
 
 func TestApp_runsAndShutsDown(t *testing.T) {
-	srv := &mockServer{}
+	srv := newMockServer()
 	go sendSIGTERM()
 	err := app.New(
 		app.WithServer(srv),
 		app.WithShutdownTimeout(2*time.Second),
 	).Run()
 	assert.NoError(t, err)
-	assert.True(t, srv.started)
-	assert.True(t, srv.stopped)
+	assert.True(t, srv.isStarted())
+	assert.True(t, srv.isStopped())
 }
 
 func TestApp_migrationRunsBeforeBeforeStart(t *testing.T) {
@@ -89,11 +128,13 @@ func TestWithLifecycle_InitFailureRollsBack(t *testing.T) {
 }
 
 func TestWithCloser_CalledOnShutdown(t *testing.T) {
-	closed := false
-	c := &testCloser{closeFn: func() error { closed = true; return nil }}
+	// Closers run in their own goroutine so a blocked Close cannot hang Run,
+	// which is why this flag needs to be atomic.
+	var closed atomic.Bool
+	c := &testCloser{closeFn: func() error { closed.Store(true); return nil }}
 	go sendSIGTERM()
 	app.New(app.WithCloser(c), app.WithShutdownTimeout(time.Second)).Run()
-	require.True(t, closed)
+	require.True(t, closed.Load())
 }
 
 // appTestChecker is a minimal core.HealthChecker for use in app tests.
@@ -230,15 +271,23 @@ func TestRun_HungServer_ReturnsAfterTimeout(t *testing.T) {
 }
 
 func TestRun_CloserCalledAfterLifecycleShutdown(t *testing.T) {
-	order := []string{}
+	var order []string
+	var mu sync.Mutex
+	track := func(s string) {
+		mu.Lock()
+		order = append(order, s)
+		mu.Unlock()
+	}
 	lc := &testLifecycle{
 		initFn:     func(ctx context.Context) error { return nil },
-		shutdownFn: func(ctx context.Context) error { order = append(order, "shutdown"); return nil },
+		shutdownFn: func(ctx context.Context) error { track("shutdown"); return nil },
 	}
-	c := &testCloser{closeFn: func() error { order = append(order, "close"); return nil }}
+	c := &testCloser{closeFn: func() error { track("close"); return nil }}
 
 	go sendSIGTERM()
 	app.New(app.WithLifecycle(lc), app.WithCloser(c), app.WithShutdownTimeout(time.Second)).Run()
 
+	mu.Lock()
+	defer mu.Unlock()
 	require.Equal(t, []string{"shutdown", "close"}, order)
 }

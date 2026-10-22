@@ -7,6 +7,12 @@
 // Use New to create a Provider and register its Shutdown with app.WithAfterStop
 // to flush all pending spans on exit.
 //
+// New also installs the global OpenTelemetry text map propagator (W3C
+// TraceContext + Baggage), which is what connects spans across process
+// boundaries. This happens whether or not an exporter is configured, because a
+// process that exports nothing itself must still forward inbound trace context
+// to its downstream calls. Use WithPropagators to override the set.
+//
 // Example — OTLP/HTTP (port 4318):
 //
 //	p, _ := tracing.New(
@@ -34,6 +40,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/pemako/forge/core"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -48,7 +55,18 @@ type options struct {
 	insecure       bool // default true (no TLS); set false via WithTLS
 	exporterFns    []func(ctx context.Context) (sdktrace.SpanExporter, error)
 	logger         core.Logger
-	extraAttrs     []attribute.KeyValue // extra resource attributes
+	extraAttrs     []attribute.KeyValue            // extra resource attributes
+	propagators    []propagation.TextMapPropagator // default: W3C TraceContext + Baggage
+}
+
+// defaultPropagators returns the propagator set installed when WithPropagators
+// is not used: W3C TraceContext (the `traceparent` / `tracestate` headers) plus
+// W3C Baggage (the `baggage` header).
+func defaultPropagators() []propagation.TextMapPropagator {
+	return []propagation.TextMapPropagator{
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	}
 }
 
 // Option is a functional option for configuring the tracing Provider.
@@ -94,6 +112,25 @@ func WithLogger(l core.Logger) Option { return func(o *options) { o.logger = l }
 //	)
 func WithAttributes(attrs ...attribute.KeyValue) Option {
 	return func(o *options) { o.extraAttrs = append(o.extraAttrs, attrs...) }
+}
+
+// WithPropagators replaces the global text map propagator set installed by New.
+// The given propagators are combined with
+// propagation.NewCompositeTextMapPropagator, so inbound extraction tries each
+// in order and outbound injection writes all of them.
+//
+// The default is W3C TraceContext + Baggage, which is what otelhttp/otelgrpc
+// and every modern collector expect; override this only to interoperate with a
+// system that speaks a different wire format (e.g. B3 for a legacy Zipkin
+// mesh). Passing no propagators leaves whatever propagator is already global
+// untouched.
+//
+//	tracing.New(tracing.WithPropagators(
+//	    propagation.TraceContext{},
+//	    b3.New(),
+//	))
+func WithPropagators(props ...propagation.TextMapPropagator) Option {
+	return func(o *options) { o.propagators = props }
 }
 
 // WithOTLP registers an OTLP/HTTP exporter sending spans to endpoint.

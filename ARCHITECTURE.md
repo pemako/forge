@@ -7,8 +7,12 @@
 ## 2. Package Layers and Dependency Direction
 
 ```
-core/             ← interfaces only (Logger, Config, Server, Provider, HealthChecker); zero deps on other mk packages
-errors/           ← CodedError; zero deps on other mk packages
+core/             ← interfaces only; zero deps on other forge packages
+                    Logger, Config, Server, Provider, HealthChecker  (core/*.go)
+                    Metrics                                          (core/metric.go)
+                    Migrator, Lifecycle, Closer,
+                    ReadinessToggler, ReadyCheckRegistrar            (core/lifecycle.go)
+errors/           ← CodedError; zero deps on other forge packages
 │
 config/logger/    ← infrastructure leaf; import core/ only
 tracing/metric/   ← infrastructure leaf; import core/ only
@@ -24,14 +28,31 @@ app/              ← import core/ only; all other types passed in as interface 
 ```
 
 **Hard rules:**
-- `core/` and `errors/` MUST NOT import any other `mk` package
+- `core/` and `errors/` MUST NOT import any other `forge` package
 - `app/` MUST NOT import `database`, `cache`, `metric`, `tracing`, or any infrastructure package
 - New packages MUST NOT import `server/http`, `server/grpc`, `middleware/*`, or `app`
+- A component implements the **`core`** spelling of a lifecycle contract
+  (`core.Lifecycle`, `core.Closer`, `core.Migrator`), never the `app` alias — a library
+  package may not import `app`, and only the `core` spelling can be asserted at compile
+  time with `var _ core.Lifecycle = (*T)(nil)`
+- A package that records metrics depends on `core.Metrics`, not on the `metric` package
 - Circular imports detected via `go build ./...` must be resolved before committing
+
+### Why the lifecycle contracts live in `core`
+
+`Migrator`, `Lifecycle`, `Closer`, `ReadinessToggler` and `ReadyCheckRegistrar` used to
+be declared in `app`. Because no library package may import `app`, components satisfied
+those contracts only by accident — there was no way to assert conformance. They now live
+in `core/lifecycle.go`; `app` retains type aliases (`app.Lifecycle = core.Lifecycle`, and
+likewise for the rest), so existing call sites are unaffected.
+
+`core.Metrics` closes a matching asymmetry: `tracing` had `core.Provider` to depend on,
+while `metric` had only package-level globals that tests could neither observe nor reset.
+`*metric.Provider` now implements `core.Metrics`, asserted in `metric/core.go`.
 
 ## 2.1 Package Tiers and Stability Contracts
 
-`mk` has grown beyond a minimal framework into an internal platform library. Packages are grouped into four tiers with different stability and maintenance expectations. **When adding a new package, assign it to a tier before merging.**
+`forge` has grown beyond a minimal framework into an internal platform library. Packages are grouped into four tiers with different stability and maintenance expectations. **When adding a new package, assign it to a tier before merging.**
 
 ### Tier 1 — Core Stable
 
@@ -40,6 +61,12 @@ app/              ← import core/ only; all other types passed in as interface 
 - Interfaces and exported behavior are **frozen**. No breaking changes without a major version bump.
 - All other tiers may depend on these.
 - Keep dependencies minimal; avoid pulling in large third-party libraries.
+
+> **Outstanding exception:** `core.Config` gained `IsSet(key string) bool`, which breaks
+> any external implementation of the interface. Adding a method to a Tier 1 interface is
+> exactly what this tier forbids, so treat it as a debt to settle at the next major
+> version rather than as precedent. For future additions prefer an optional extension
+> interface that callers type-assert for, so existing implementations keep compiling.
 
 ### Tier 2 — Infrastructure Integrations
 
@@ -111,8 +138,8 @@ c := cache.Client("default")   // convenience
 
 These retain package-level helpers to break import cycles or serve genuinely stateless ops:
 
-- `logger.Default()` / `logger.SetDefault()` — bootstrap convenience; prefer constructor injection
-- `metric.Count()` / `Gauge()` / `StartTimer()` — facade needed by `middleware/*` (import cycle prevention); wire functions are idempotent via `sync.Once`
+- `logger.Default()` / `logger.SetDefault()` — bootstrap convenience; prefer constructor injection. `Default()` returns a **discarding** logger until `SetDefault` is called.
+- `metric.Count()` / `Gauge()` / `StartTimer()` — facade needed by `middleware/*` (import cycle prevention). The middleware wiring is **no longer one-shot**: the hook set is swapped atomically and the most recent `Provider.Init()` wins. To depend on metrics from a library package, take a `core.Metrics` instead of calling these.
 
 ## 4. Registry Semantics
 
@@ -136,7 +163,7 @@ All named registry packages follow a two-tier contract:
 | Function | Provided by |
 |----------|------------|
 | `CloseBackend(name string) error` | `cache.Manager` (close a single backend) |
-| `Close() error` (implements `app.Closer`) | `cache.Manager`, `grpcclient.Registry` |
+| `Close() error` (implements `core.Closer`) | `cache.Manager`, `grpcclient.Registry` |
 | `HealthChecker(name string) core.HealthChecker` | `database.Manager`, `cache.Manager` |
 
 ### Why `Close(name)` is NOT part of the base contract
@@ -153,7 +180,7 @@ Registry packages: `database`, `cache`, `httpclient`, `grpcclient`, `storage`, `
 
 ## 5. Lifecycle Roles
 
-Three interfaces govern component lifecycle, all coordinated by `app.Run()`:
+Five interfaces govern component lifecycle, all declared in `core` and all coordinated by `app.Run()`. `app` exposes type aliases for the first three (`app.Lifecycle`, `app.Closer`, `app.Migrator`), but a component should implement the `core` spelling — see §2.
 
 ```go
 // core.Server — owns a blocking goroutine
@@ -163,37 +190,83 @@ type Server interface {
   Stop(ctx context.Context) error
 }
 // Implementations: server/http, server/grpc, cron.Scheduler, stream.Bus.Worker()
+// If every registered Start returns while the app should still be serving,
+// app.Run returns app.ErrServersExited instead of blocking forever.
 
-// app.Lifecycle — non-blocking resource with explicit init/shutdown
+// core.Lifecycle — non-blocking resource with explicit init/shutdown
 // Init called before servers start; Shutdown called after servers stop (reverse order).
-// If Init[i] fails, Init[0..i-1].Shutdown() are called before Run returns.
+// If Init[i] fails, Init[0..i-1].Shutdown() AND every Closer.Close() run before Run returns.
 type Lifecycle interface {
   Init(ctx context.Context) error
   Shutdown(ctx context.Context) error
 }
 // Implementations: tracing.Provider, metric.Provider
 
-// app.Closer — resource released after all Lifecycle.Shutdown calls
-// Close called in registration order; errors collected but do not stop subsequent Closers.
+// core.Closer — resource released after all Lifecycle.Shutdown calls
+// Close called in REVERSE registration order (matching Lifecycle), so a component
+// may depend on one registered before it. Errors are collected but do not stop
+// subsequent Closers. Close takes no context, so app bounds the wait itself.
 type Closer interface {
   Close() error
 }
 // Implementations: cache.Manager, grpcclient.Registry
+
+// core.Migrator — schema migrations applied before any server starts
+type Migrator interface {
+  Up(ctx context.Context) error
+}
+// Implementations: database.Manager
+
+// core.ReadinessToggler / core.ReadyCheckRegistrar — OPTIONAL extras a Server may
+// implement. app drives readiness and registers health checkers through them.
+type ReadinessToggler interface    { SetReady(ready bool) }
+type ReadyCheckRegistrar interface { AddReadyCheck(name string, fn func(context.Context) error) }
+// Implementations: server/http, server/grpc
 ```
 
 ### app.Run() Lifecycle Order
 
 ```
-1. Migrator.Up()                   database migrations
-2. Lifecycle.Init()                sequential; abort + reverse-rollback on failure
-3. BeforeStart hooks               sequential; first error aborts
-4. Server.Start()                  all servers concurrent
-5. Block                           until SIGTERM/SIGINT or server error
-6. Server.Stop()                   concurrent; stop errors logged (not returned if runErr set)
-7. Lifecycle.Shutdown()            reverse registration order
-8. Closer.Close()                  registration order
-9. AfterStop hooks                 sequential
+ 1. Readiness probes       WithHealthCheck checkers registered on every server
+                           implementing core.ReadyCheckRegistrar, before any
+                           server starts, so the probe list is never mutated
+                           while traffic is being served
+ 2. Migrator.Up()          database migrations
+ 3. Lifecycle.Init()       sequential; abort + reverse-rollback + run Closers
+ 4. BeforeStart hooks      sequential; first error aborts (same rollback)
+ 5. Server.Start()         all servers concurrent; then all marked ready
+ 6. Block                  until SIGTERM/SIGINT, App.Stop(), ctx cancel, or
+                           server error
+ 7. Drain                  servers marked NOT ready, then WithDrainDelay waited out
+ 8. Server.Stop()          concurrent, bounded by WithShutdownTimeout
+ 9. Lifecycle.Shutdown()   reverse registration order
+10. Closer.Close()         reverse registration order
+11. AfterStop hooks        sequential
 ```
+
+### Shutdown robustness guarantees
+
+| Guarantee | Why it matters |
+|-----------|----------------|
+| Signals trapped **before** migrations | A SIGTERM during a migration previously hit the default disposition and killed the process mid-migration. |
+| A **second** SIGTERM/SIGINT abandons the remaining waits | An operator is never stuck with a process that ignores signals. |
+| Each post-server phase gets its **own** deadline, floored at 5s (capped by `WithShutdownTimeout`) | A slow server drain used to hand an already-expired context to `Lifecycle.Shutdown`, so telemetry was never flushed. |
+| Each `Closer.Close()` runs in its own goroutine, bounded by the budget | `Close` takes no context and cannot be cancelled; a hung `Close` now leaks one goroutine instead of hanging the process forever. |
+| Panics recovered in every callback, hook and server goroutine | Reported as `app.ErrPanic` with a logged stack; remaining shutdown phases still run, so a panic does not kill the process with resources held. |
+| Startup failure rolls back Lifecycles **and** runs Closers | A `BeforeStart` failure used to return with every pool and client still open. |
+
+### Programmatic shutdown
+
+```go
+a := app.New(app.WithServer(srv))
+go func() { _ = a.RunContext(ctx) }()  // cancelling ctx requests graceful shutdown
+a.Stop()                              // or ask for it directly; idempotent, safe before Run
+```
+
+`App.Stop()` returns immediately; `Run` performs the shutdown and returns when it
+completes. Cancelling the `RunContext` context requests the same graceful shutdown a
+signal would — the shutdown sequence itself is **not** bound by that context, so
+cancelling it does not cut the drain short.
 
 ### app orchestrator principle
 
@@ -205,9 +278,10 @@ type Closer interface {
 |----------|---------|
 | Startup sequencing | Migrations → Lifecycle.Init → BeforeStart hooks → Server.Start |
 | Shutdown sequencing | Server.Stop → Lifecycle.Shutdown → Closer.Close → AfterStop hooks |
-| Timing and policy | `WithShutdownTimeout`, deadline propagation |
-| Identity metadata | `WithName`, `WithVersion` (used in health check responses) |
-| Observability wiring | `WithLogger`, `WithHealthCheck` (centralised collection for bridging into server/http) |
+| Timing and policy | `WithShutdownTimeout`, `WithDrainDelay`, per-phase deadline flooring |
+| Identity metadata | `WithName`, `WithVersion` (emitted in the `app: starting` / `app: shutdown complete` log lines) |
+| Observability wiring | `WithLogger`; `WithHealthCheck` (registered on every server implementing `core.ReadyCheckRegistrar`) |
+| Readiness orchestration | Marks servers implementing `core.ReadinessToggler` ready after startup and not-ready at the start of shutdown |
 
 **Will never be added to app:**
 
@@ -319,7 +393,47 @@ metric.Provider.Init()
   └─ wireGRPCMetrics()  // calls middleware/grpc.RegisterGRPCMetricHooks()
 ```
 
-Both wire functions are guarded by `sync.Once` — calling `Init()` on multiple `metric.Provider` instances is safe; only the first takes effect for middleware hooks.
+Both wire functions install their hook set into an `atomic.Pointer` in the middleware
+package, swapped as one immutable value. Consequences:
+
+- The request path never reads a partially-wired set — four individually-assigned
+  package vars previously tripped the race detector, since `metric.Init` wrote them
+  while in-flight requests read them.
+- Wiring is **repeatable**: the most recent `Init` wins. The old `sync.Once` guard meant
+  a second `Provider` (another app instance, or the next test in the same binary) was
+  silently ignored and kept reporting through the first one's instruments, under the
+  first one's service name.
+- `middleware/http.ResetHTTPMetricHooks()` and `middleware/grpc.ResetGRPCMetricHooks()`
+  restore the no-ops, so a test can unwire instruments a previous `Init` installed.
+
+Each wire function also installs an error counter (`*_http_errors_total{reason,code}`,
+`*_grpc_errors_total{method,status}`) alongside the request total, duration histogram and
+in-flight gauge.
+
+## 10.1 Error Reporting Across Layers
+
+The `errors.Wrap` cause chain is deliberately withheld from both the HTTP response body
+and the gRPC status message. It is not discarded:
+
+| Sink | What it gets |
+|------|--------------|
+| HTTP response body | `CodedError` only: `code`, `reason`, `message` |
+| gRPC status | mapped code + `ce.Message`, plus a `google.rpc.ErrorInfo` detail carrying `Reason` and `Metadata` under domain `grpcMiddleware.ErrorInfoDomain` (`"forge"`) |
+| Active span | `span.RecordError(err)` with `error.code` / `error.reason` attributes; status set to `codes.Error` for 5xx |
+| Log line | `error` (the full `Error()` string, i.e. `"message: cause"`) and `error_reason` fields |
+| Metrics | `*_http_errors_total{reason,code}` / `*_grpc_errors_total{method,status}` |
+
+`middleware/http.Logger` and `middleware/grpc.UnaryLogger` pick their level from the
+outcome — HTTP: `<400` INFO, `4xx` WARN, `5xx` ERROR; gRPC: `OK` INFO, caller-fault codes
+WARN, everything else ERROR — so a failing endpoint is visible without grepping statuses.
+
+The HTTP→gRPC code table in `middleware/grpc` is the inverse of the canonical
+`google/rpc/code.proto` mapping and covers 17 HTTP codes. Where the canonical mapping is
+many-to-one (HTTP 400 ← `InvalidArgument`/`FailedPrecondition`/`OutOfRange`; 409 ←
+`AlreadyExists`/`Aborted`; 500 ← `Unknown`/`Internal`/`DataLoss`) the most widely used
+code is chosen. Unlisted HTTP codes fall back to `codes.Internal`, and
+`context.DeadlineExceeded` / `context.Canceled` are mapped explicitly so the retryability
+signal is not lost.
 
 ## 11. New Package Checklist
 
@@ -422,10 +536,21 @@ hc := cacheMgr.HealthChecker("redis")    // core.HealthChecker; probes PING
 // hc.Check(ctx) returns nil on healthy, non-nil on failure
 ```
 
-Wire into `/readyz` via one of three patterns:
+Wire into `/readyz` via one of these patterns:
 
 ```go
-// Pattern A: at construction time (preferred)
+// Pattern A (preferred): hand them to app, which registers them on every server
+// implementing core.ReadyCheckRegistrar — both built-in servers do — before any
+// server starts.
+app.New(
+  app.WithServer(httpSrv, grpcSrv),
+  app.WithHealthCheck(
+    dbMgr.HealthChecker("default"),
+    cacheMgr.HealthChecker("redis"),
+  ),
+).Run()
+
+// Pattern B: at construction time, when not using app
 srv, _ := httpserver.New(
   httpserver.WithHealthChecks(
     dbMgr.HealthChecker("default"),
@@ -433,27 +558,51 @@ srv, _ := httpserver.New(
   ),
 )
 
-// Pattern B: after construction in BeforeStart
-app.WithBeforeStart(func(ctx context.Context) error {
-  httpSrv.AddReadyCheck("db", dbMgr.HealthChecker("default").Check)
-  return nil
-})
-
-// Pattern C: centralized via app, bridged manually
-myApp := app.New(app.WithHealthCheck(dbMgr.HealthChecker("default"), cacheMgr.HealthChecker("redis")))
-app.WithBeforeStart(func(ctx context.Context) error {
-  for _, hc := range myApp.HealthCheckers() {
-    httpSrv.AddReadyCheck(hc.Name(), hc.Check)
-  }
-  return nil
-})
+// Pattern C: ad-hoc probe that is not a core.HealthChecker
+httpSrv.AddReadyCheck("warm-cache", func(ctx context.Context) error { ... })
 ```
+
+> **The manual bridging recipe is obsolete.** `app.WithHealthCheck` used to store the
+> checkers and wire nothing, so callers had to copy them across in a `BeforeStart`
+> hook. That hook is now redundant — remove it rather than keeping it alongside
+> Pattern A, or every probe is registered twice.
+>
+> ```go
+> // ❌ no longer needed
+> app.WithBeforeStart(func(ctx context.Context) error {
+>   for _, hc := range myApp.HealthCheckers() {
+>     httpSrv.AddReadyCheck(hc.Name(), hc.Check)
+>   }
+>   return nil
+> })
+> ```
+
+`App.HealthCheckers()` still exists, for wiring checkers somewhere `app` does not
+reach. If no registered server accepts probes, `Run` logs that the checkers went
+nowhere instead of discarding them silently.
 
 `core.HealthChecker` is defined in `core/` to avoid import cycles — infrastructure packages implement it without importing `server/http` or `app`.
 
+### Readiness is orchestrated, not hand-set
+
+`app` marks every server implementing `core.ReadinessToggler` ready once all servers
+have started, and not-ready at the very start of shutdown. **Do not call
+`httpSrv.SetReady(true)` from a `BeforeStart` hook** — that advertises readiness
+before the listener is up, and it fights `app` for ownership of the flag.
+
+For `server/grpc` this drives the gRPC health protocol. The health service now starts
+`NOT_SERVING` (it used to claim `SERVING` from `New()`, i.e. before migrations and
+`Lifecycle.Init` had run), so a `server/grpc` used **without** `app` must call
+`SetReady(true)` itself or health-aware clients will never route to it.
+
+`WithDrainDelay(d)` (default 0) is the pause between "marked not-ready" and "servers
+stopped", giving load balancers time to observe the failing probe. Set it to roughly
+`periodSeconds × failureThreshold` of your readiness probe, and keep
+`WithDrainDelay + WithShutdownTimeout` below `terminationGracePeriodSeconds`.
+
 ## 13. Multi-backend Abstraction Semantics
 
-Several packages in mk expose a single interface over multiple backends (`cache`, `ratelimit`, `storage`, `notify`). This pattern provides a convenient unified API but carries a risk: the interface hides semantic differences that affect correctness, not just performance. **Switching backends is not always a drop-in change.**
+Several packages in forge expose a single interface over multiple backends (`cache`, `ratelimit`, `storage`, `notify`). This pattern provides a convenient unified API but carries a risk: the interface hides semantic differences that affect correctness, not just performance. **Switching backends is not always a drop-in change.**
 
 ### Semantic layers
 

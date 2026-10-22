@@ -37,33 +37,33 @@ import (
 	"time"
 
 	"github.com/pemako/forge/core"
+	"github.com/pemako/forge/logger"
 )
 
-// Migrator is the interface app accepts for running database migrations before
-// servers are started. *database.Manager implements this interface.
-// It is defined here (rather than in the database package) to avoid import cycles.
-type Migrator interface {
-	// Up applies all pending migrations. It is called once during app startup,
-	// before BeforeStart hooks and server initialization.
-	Up(ctx context.Context) error
-}
+// The lifecycle contracts live in core so that library packages — which must
+// not import app — can assert they satisfy them at compile time. These aliases
+// keep the app.Lifecycle spelling working.
+type (
+	// Migrator applies schema migrations before any server starts.
+	// See core.Migrator.
+	Migrator = core.Migrator
 
-// Lifecycle manages the lifecycle of a non-blocking resource.
-// Init is called after migrations and before BeforeStart hooks.
-// If Init fails, all previously Init'd Lifecycle components are Shutdown in
-// reverse order before Run returns the error.
-// Shutdown is called after all servers have stopped, in reverse registration order.
-type Lifecycle interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
-}
+	// Lifecycle manages a resource set up before servers start and torn down
+	// after they stop. See core.Lifecycle.
+	Lifecycle = core.Lifecycle
 
-// Closer releases resources after all servers have stopped and all Lifecycle
-// Shutdown calls have completed. Close is called in registration order.
-// Errors are collected but do not stop subsequent Closers.
-type Closer interface {
-	Close() error
-}
+	// Closer releases resources after all Lifecycle shutdowns complete.
+	// See core.Closer.
+	Closer = core.Closer
+
+	// ReadinessToggler is an optional Server interface letting app drive the
+	// readiness flag. See core.ReadinessToggler.
+	ReadinessToggler = core.ReadinessToggler
+
+	// ReadyCheckRegistrar is an optional Server interface accepting readiness
+	// probes. See core.ReadyCheckRegistrar.
+	ReadyCheckRegistrar = core.ReadyCheckRegistrar
+)
 
 // options holds the functional configuration for New.
 type options struct {
@@ -76,20 +76,34 @@ type options struct {
 	closers         []Closer
 	checkers        []core.HealthChecker
 	shutdownTimeout time.Duration
+	drainDelay      time.Duration
 	beforeStart     []func(context.Context) error
 	afterStop       []func(context.Context) error
+}
+
+func defaultOptions() options {
+	return options{
+		name:            "app",
+		version:         "unknown",
+		shutdownTimeout: 30 * time.Second,
+		logger:          logger.Default(),
+	}
 }
 
 // Option is a functional option for configuring the App.
 type Option func(*options)
 
-// WithName sets the application name used in log output. Defaults to "app".
+// WithName sets the application name. It is included in the "app: starting" and
+// "app: shutdown complete" log lines. Defaults to "app".
 func WithName(name string) Option { return func(o *options) { o.name = name } }
 
-// WithVersion sets the application version string used in log output. Defaults to "unknown".
+// WithVersion sets the application version string. It is included in the
+// "app: starting" and "app: shutdown complete" log lines. Defaults to "unknown".
 func WithVersion(v string) Option { return func(o *options) { o.version = v } }
 
-// WithLogger sets the logger used for lifecycle events. Defaults to logger.Default().
+// WithLogger sets the logger used for lifecycle events. Defaults to
+// logger.Default(), which discards everything until logger.SetDefault is called
+// — so pass this (or call SetDefault) if you want to see lifecycle logs.
 func WithLogger(l core.Logger) Option { return func(o *options) { o.logger = l } }
 
 // WithServer registers one or more servers to be started concurrently by Run.
@@ -98,10 +112,23 @@ func WithServer(servers ...core.Server) Option {
 	return func(o *options) { o.servers = append(o.servers, servers...) }
 }
 
-// WithShutdownTimeout sets the maximum time allowed for all servers to stop
-// gracefully. Defaults to 30 seconds.
+// WithShutdownTimeout sets the budget for stopping all servers gracefully.
+// Each post-server phase (Lifecycle.Shutdown, Closer.Close, AfterStop) gets
+// whatever is left of this budget, floored at 5 seconds so a slow drain cannot
+// starve telemetry flushing. Defaults to 30 seconds.
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(o *options) { o.shutdownTimeout = d }
+}
+
+// WithDrainDelay sets how long Run waits, after marking servers not-ready but
+// before stopping them, so load balancers observe the failing readiness probe
+// and stop sending new requests. Defaults to 0 (no wait).
+//
+// Set this to a small multiple of your readiness probe interval — in Kubernetes,
+// roughly periodSeconds × failureThreshold — and keep
+// WithDrainDelay + WithShutdownTimeout below terminationGracePeriodSeconds.
+func WithDrainDelay(d time.Duration) Option {
+	return func(o *options) { o.drainDelay = d }
 }
 
 // WithMigration registers a Migrator whose Up method is called once before
@@ -132,25 +159,24 @@ func WithLifecycle(components ...Lifecycle) Option {
 }
 
 // WithCloser registers one or more Closer instances to be called after all
-// Lifecycle Shutdown calls have completed, in registration order.
+// Lifecycle Shutdown calls have completed, in reverse registration order.
 // Errors are collected but do not stop subsequent Closers.
 func WithCloser(closers ...Closer) Option {
 	return func(o *options) { o.closers = append(o.closers, closers...) }
 }
 
 // WithHealthCheck registers one or more HealthChecker instances with the App.
-// The app does not automatically wire these into any server; callers should
-// bridge them to server/http in a WithBeforeStart hook:
+// Run registers each of them as a readiness probe on every server that
+// implements ReadyCheckRegistrar, before any server starts — so for the
+// built-in HTTP and gRPC servers no further wiring is needed:
 //
 //	app.New(
+//	    app.WithServer(httpSrv),
 //	    app.WithHealthCheck(dbMgr.HealthChecker("default")),
-//	    app.WithBeforeStart(func(ctx context.Context) error {
-//	        for _, hc := range a.HealthCheckers() {
-//	            httpSrv.AddReadyCheck(hc.Name(), hc.Check)
-//	        }
-//	        return nil
-//	    }),
 //	)
+//
+// If no registered server accepts probes, Run logs that the checkers went
+// nowhere rather than failing silently.
 func WithHealthCheck(checkers ...core.HealthChecker) Option {
 	return func(o *options) { o.checkers = append(o.checkers, checkers...) }
 }

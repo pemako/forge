@@ -62,12 +62,17 @@ func Count(ctx context.Context, name string, n int64, labels ...LabelOption) {
 }
 
 // Gauge is a convenience facade that delegates to the default metric Provider.
-// It sets the named float64 up-down counter to value. Use this for metrics that
-// can increase or decrease (e.g., active connections, queue depth).
+// It sets the named gauge to value, replacing whatever was recorded before.
+// Use it for a point-in-time reading (e.g., queue depth, pool size).
 // If Init has not been called, this is a no-op.
+//
+// This previously shared GaugeAdd's body — Float64UpDownCounter.Add — so despite
+// documenting "sets" it accumulated, and the two functions were identical. It
+// now uses OTel's synchronous gauge, whose Record replaces the value. For
+// increment/decrement semantics use GaugeAdd and GaugeSub.
 func Gauge(ctx context.Context, name string, value float64, labels ...LabelOption) {
-	g, _ := getMeter().Float64UpDownCounter(name)
-	g.Add(ctx, value, otelmetric.WithAttributes(toAttrs(labels)...))
+	g, _ := getMeter().Float64Gauge(name)
+	g.Record(ctx, value, otelmetric.WithAttributes(toAttrs(labels)...))
 }
 
 // GaugeAdd is a convenience facade that delegates to the default metric Provider.

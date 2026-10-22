@@ -87,6 +87,11 @@ func (s *stubConfig) GetFloat64(key string) float64 {
 	return f
 }
 
+func (s *stubConfig) IsSet(key string) bool {
+	_, ok := s.m[key]
+	return ok
+}
+
 func (s *stubConfig) GetDuration(key string) time.Duration {
 	d, _ := time.ParseDuration(strings.TrimSpace(s.m[key]))
 	return d

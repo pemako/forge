@@ -173,8 +173,13 @@ func (s *stubConfig) GetInt(key string) int {
 	}
 	return n
 }
-func (s *stubConfig) GetBool(key string) bool              { return false }
-func (s *stubConfig) GetFloat64(key string) float64        { return 0 }
+func (s *stubConfig) GetBool(key string) bool       { return false }
+func (s *stubConfig) GetFloat64(key string) float64 { return 0 }
+func (s *stubConfig) IsSet(key string) bool {
+	_, ok := s.m[key]
+	return ok
+}
+
 func (s *stubConfig) GetDuration(key string) time.Duration { return 0 }
 func (s *stubConfig) GetStringSlice(key string) []string   { return nil }
 func (s *stubConfig) Scan(key string, dest any) error      { return nil }
