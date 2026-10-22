@@ -88,7 +88,7 @@ func WithLogger(l core.Logger) Option    // 注入日志器
 | gRPC 指标 `status` 标签改为真实码名 | 匹配 `status="ERROR"` 的看板和告警将不再命中 | 改为匹配 `"NotFound"`、`"Unavailable"` 等 |
 | `RegisterHTTPMetricHooks` / `RegisterGRPCMetricHooks` 新增 `errorsInc` 参数 | 直接调用方无法编译 | 补上该回调（库内仅 `metric` 调用） |
 | `tracing.New` 无条件安装全局 W3C 传播器 | 此前断开的跨服务链路现在会连接起来 | 无需处理——这是修复。即使关闭 tracing 也要调用 `tracing.New()` |
-| 未传 `WithWatch()` 时 `config.Watch` 返回 `ErrWatchDisabled` | 原本静默无效的 `Watch` 调用现在会报错 | 补上 `config.WithWatch()`，或移除 `Watch` 调用 |
+| 未传 `WithWatch()` 时 `Config.Watch` 返回 `ErrWatchDisabled` | 原本静默无效的 `Watch` 调用现在会报错 | 补上 `config.WithWatch()`，或移除 `Watch` 调用 |
 | 配置块格式错误时 `cache.New` / `database.New` 返回 `ErrInvalidConfig` | 拼错的配置块现在会报错，而不是产出零个后端 | 修正配置块，并检查返回的 error |
 | `app.WithHealthCheck` 自动注册探针 | 旧的 `BeforeStart` 桥接钩子会导致每个探针被重复注册一次 | 删除该钩子 |
 | 就绪状态由 `app` 驱动 | 在 `BeforeStart` 里调用 `httpSrv.SetReady(true)` 会过早对外宣告就绪 | 删除该调用，交由 `app` 处理 |

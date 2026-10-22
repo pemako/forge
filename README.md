@@ -28,7 +28,7 @@ Read this before upgrading. Each item is covered in detail in its package sectio
 | gRPC metric `status` label is the real code name | Dashboards and alerts matching `status="ERROR"` match nothing | Rewrite them against `"NotFound"`, `"Unavailable"`, … |
 | `RegisterHTTPMetricHooks` / `RegisterGRPCMetricHooks` gained an `errorsInc` parameter | Direct callers stop compiling | Pass the extra callback (only `metric` calls these in-tree) |
 | `tracing.New` installs the global W3C propagator unconditionally | Traces start connecting across services where they previously did not | Nothing — this was broken before. Call `tracing.New()` even when tracing is off |
-| `config.Watch` returns `ErrWatchDisabled` without `WithWatch()` | A `Watch` call that silently did nothing now errors | Add `config.WithWatch()`, or stop calling `Watch` |
+| `Config.Watch` returns `ErrWatchDisabled` without `WithWatch()` | A `Watch` call that silently did nothing now errors | Add `config.WithWatch()` at Load, or stop calling `Watch` |
 | `cache.New` / `database.New` return `ErrInvalidConfig` on a malformed block | A typo'd config block now fails instead of yielding zero backends | Fix the block; check the returned error |
 | `app.WithHealthCheck` auto-registers probes | The old `BeforeStart` bridging hook registers every probe a second time | Delete the hook |
 | `app` drives readiness | `httpSrv.SetReady(true)` in `BeforeStart` advertises readiness too early | Delete that call; `app` handles it |
@@ -211,6 +211,7 @@ server:
     timeout: 30s # read and write timeout (default 30s)
   grpc:
     addr: :9090 # listen address (default :9090)
+    ui_addr: '' # grpcui listen address; only used when WithGRPCUI is set
 
 # Structured logger
 logger:
@@ -260,6 +261,68 @@ cache:
 # ID generation — see the idgen section; set this explicitly in production
 idgen:
   worker_id: 42
+
+# JWT signing and verification
+auth:
+  secret: 'change-me' # HMAC signing key
+  expire: 24h # token lifetime
+  issuer: my-service # "iss" claim
+
+# Redis distributed lock — or pass cache.RedisClient("redis") to NewWithClient
+# instead and skip these keys entirely
+lock:
+  addr: 'redis:6379'
+  password: ''
+  db: 0
+
+# Rate limiter, when constructed with ratelimit.WithConfig. The HTTP and gRPC
+# middleware do NOT read these — they take Rate/Burst from their own config structs.
+ratelimit:
+  rate: 100 # requests per second per key
+  burst: 10 # burst above the sustained rate (in-process limiter)
+  window: 1s # window for the distributed Redis limiter
+
+# Object storage — one backend per storage.New call
+storage:
+  provider: s3 # s3 | oss | cos
+  region: us-east-1
+  bucket: my-bucket
+  access_key: ''
+  secret_key: ''
+  endpoint: '' # required for OSS/COS; optional S3-compatible override
+
+# Notification channels — configure only the ones you use
+notify:
+  email:
+    host: smtp.example.com
+    port: 587
+    username: ''
+    password: ''
+    from: 'noreply@example.com'
+  sms: # Aliyun SMS
+    access_key: ''
+    secret_key: ''
+    region: cn-hangzhou
+    sign_name: ''
+    template_code: ''
+  dingtalk_webhook: ''
+  wecom_webhook: ''
+  feishu_webhook: ''
+
+# Outbound gRPC clients, read by grpcclient.Init(cfg, "user", "order").
+# Each sub-key is a connection name; Init registers one *grpc.ClientConn per name.
+grpcclient:
+  user:
+    addr: 'user-service:9090'
+    insecure: true
+    timeout: 5s
+    retry: 3
+
+# pprof profiling endpoints
+pprof:
+  addr: :6060 # standalone server address; or mount on an existing gin.Engine
+  block_rate: 0 # runtime.SetBlockProfileRate; 0 disables
+  mutex_fraction: 0 # runtime.SetMutexProfileFraction; 0 disables
 ```
 
 Environment variables override any YAML key. With `WithEnv("APP")`, the variable `APP_SERVER_HTTP_ADDR` overrides `server.http.addr`.
@@ -760,8 +823,8 @@ r.Use(
   mw.CORS(),
   mw.Timeout(10 * time.Second),
   mw.BodyLimit(4 * 1024 * 1024),        // 4 MB
-  mw.RateLimit(ratelimit.NewTokenBucket(100, 10)),
-  mw.IPFilter(mw.WithCIDRWhitelist("10.0.0.0/8")),
+  mw.RateLimit(mw.RateLimitConfig{Rate: 100, Burst: 10}),
+  mw.IPFilter(mw.IPFilterConfig{Mode: "whitelist", IPs: []string{"10.0.0.0/8"}}),
 )
 ```
 
@@ -913,7 +976,7 @@ scheduler, _ := cron.New(cron.WithLogger(log), cron.WithLocation(time.UTC))
 scheduler.Add("cleanup", "@every 1h",
   func(ctx context.Context) error { return cleanupOldRecords(ctx) },
   cron.WithTimeout(5*time.Minute),
-  cron.WithRetry(3),
+  cron.WithRetries(3),
   cron.WithSkipIfRunning(),
   cron.WithDistributedLock(locker), // only one cluster node runs each tick
 )
@@ -974,23 +1037,46 @@ bus.Publish(ctx, "order.created", order)
 ### `auth`
 
 ```go
+// Claims must implement auth.Claims; embedding jwt.RegisteredClaims satisfies it.
 type Claims struct {
   jwt.RegisteredClaims
   UserID int64  `json:"user_id"`
   Role   string `json:"role"`
 }
 
-signer, _ := auth.NewSigner[Claims](auth.WithSecret("my-secret"), auth.WithTTL(24*time.Hour))
-token, _ := signer.Sign(Claims{UserID: 42, Role: "admin"})
+// Options are shared between signing and verification.
+authOpts := []auth.Option{
+  auth.WithSecret("my-secret"),
+  auth.WithExpire(24 * time.Hour),
+  auth.WithClaims(func() auth.Claims { return &Claims{} }),  // required for parsing
+}
 
 r.POST("/login", func(c *gin.Context) {
+  token, err := auth.Generate(&Claims{UserID: 42, Role: "admin"}, authOpts...)
+  if err != nil {
+    c.Error(err)
+    return
+  }
   c.JSON(200, gin.H{"token": token})
 })
-r.GET("/profile", auth.Required[Claims](signer), func(c *gin.Context) {
-  claims := auth.FromContext[Claims](c)
+
+// Required rejects a missing or invalid token with 401 before the handler runs.
+// Optional parses the token when present and never blocks.
+r.GET("/profile", auth.Required(authOpts...), func(c *gin.Context) {
+  claims, ok := auth.FromContext[*Claims](c.Request.Context())
+  if !ok {
+    c.Error(errors.ErrUnauthorized)
+    return
+  }
   c.JSON(200, claims)
 })
 ```
+
+`WithClaims` must be supplied for verification — it tells `auth` what concrete
+type to unmarshal into. `FromContext` takes a `context.Context` (not the
+`*gin.Context`) and returns `(T, bool)`.
+
+For gRPC, use `auth.UnaryAuth(authOpts...)` or `auth.OptionalUnaryAuth(authOpts...)`.
 
 ---
 
@@ -1066,18 +1152,25 @@ err := cb.Execute(ctx, func(ctx context.Context) error {
 ### `storage`
 
 ```go
-// Create instance first, then register
-s, err := storage.New(storage.WithS3(storage.S3Config{
-  Bucket: "my-avatars", Region: "us-east-1",
-  AccessKey: cfg.GetString("storage.access_key"),
-  SecretKey: cfg.GetString("storage.secret_key"),
-}))
+// Create instance first, then register. Provider is "s3", "oss" or "cos".
+s, err := storage.New(
+  storage.WithProvider("s3"),
+  storage.WithRegion("us-east-1"),
+  storage.WithBucket("my-avatars"),
+  storage.WithAccessKey(
+    cfg.GetString("storage.access_key"),
+    cfg.GetString("storage.secret_key"),
+  ),
+)
 storage.Register("avatars", s)
 
 s := storage.Get("avatars")
-err := s.Put(ctx, "user/42/avatar.png", reader, size, "image/png")
-url, _ := s.GetURL(ctx, "user/42/avatar.png", time.Hour)
-err = s.Delete(ctx, "user/42/avatar.png")
+url, err := s.Upload(ctx, "user/42/avatar.png", reader,
+  storage.WithContentType("image/png"))
+rc, err := s.Download(ctx, "user/42/avatar.png")   // caller closes rc
+ok, err := s.Exists(ctx, "user/42/avatar.png")
+signed, err := s.PresignURL(ctx, "user/42/avatar.png", time.Hour)
+err = s.Delete(ctx, "user/42/avatar.png")          // missing keys are not an error
 ```
 
 ---
@@ -1123,14 +1216,35 @@ pprof.Register(r)          // adds /debug/pprof/* routes
 
 ```go
 // In-process token bucket
-lim := ratelimit.NewTokenBucket(100, 10) // 100 req/s, burst 10
+lim := ratelimit.New(ratelimit.WithRate(100), ratelimit.WithBurst(10))
 
-// Distributed Redis fixed-window
-lim := ratelimit.NewRedisFixedWindow(cache.RedisClient("redis"), "api", 1000, time.Minute)
+// Distributed Redis fixed-window — share the client via cache
+lim = ratelimit.New(
+  ratelimit.WithRate(1000),
+  ratelimit.WithWindow(time.Minute),
+  ratelimit.WithRedis(cache.RedisClient("redis")),
+)
 
-// Use as middleware
-r.Use(mw.RateLimit(lim))
+if !lim.Allow(ctx, "user:42") {
+  // over the limit
+}
 ```
+
+> The Redis-backed limiter **fails open** — if Redis is unreachable, `Allow`
+> returns true rather than rejecting traffic.
+
+The HTTP and gRPC middleware do not take a `Limiter`; they build an in-process
+one from their own config, so middleware rate limiting is always per-instance:
+
+```go
+r.Use(mw.RateLimit(mw.RateLimitConfig{Rate: 100, Burst: 10}))
+grpcserver.WithUnaryInterceptors(
+  mwgrpc.UnaryRateLimit(mwgrpc.GRPCRateLimitConfig{Rate: 100, Burst: 10}),
+)
+```
+
+For a cluster-wide limit, construct a Redis-backed `Limiter` as above and call
+`Allow` yourself.
 
 ---
 
